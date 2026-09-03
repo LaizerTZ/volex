@@ -131,10 +131,10 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
                     <td className="py-3 px-3 font-semibold text-slate-900">{line.itemDescription}</td>
                     <td className="py-3 px-2 text-center font-mono text-slate-600">{line.unitOfMeasure}</td>
                     <td className="py-3 px-3 text-right font-bold text-slate-900">{line.invoicedQuantity}</td>
-                    <td className="py-3 px-3 text-right text-slate-700">${formatCurrency(line.unitPrice)}</td>
-                    <td className="py-3 px-3 text-right text-slate-800">${formatCurrency(line.valueBeforeVat)}</td>
-                    <td className="py-3 px-3 text-right text-slate-500">${formatCurrency(line.vatAmount)}</td>
-                    <td className="py-3 px-3 text-right font-bold text-slate-900">${formatCurrency(line.valueAfterVat)}</td>
+                    <td className="py-3 px-3 text-right text-slate-700">TZS {formatCurrency(line.unitPrice)}</td>
+                    <td className="py-3 px-3 text-right text-slate-800">TZS {formatCurrency(line.valueBeforeVat)}</td>
+                    <td className="py-3 px-3 text-right text-slate-500">TZS {formatCurrency(line.vatAmount)}</td>
+                    <td className="py-3 px-3 text-right font-bold text-slate-900">TZS {formatCurrency(line.valueAfterVat)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -165,15 +165,15 @@ export const InvoicePrintModal: React.FC<InvoicePrintModalProps> = ({
             <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-2.5 text-xs">
               <div className="flex justify-between text-slate-600">
                 <span>Subtotal (Before VAT):</span>
-                <span className="font-bold text-slate-900">${formatCurrency(invoice.subtotalBeforeVat)}</span>
+                <span className="font-bold text-slate-900">TZS {formatCurrency(invoice.subtotalBeforeVat)}</span>
               </div>
               <div className="flex justify-between text-slate-600">
                 <span>Value Added Tax (VAT 18%):</span>
-                <span className="font-bold text-slate-900">${formatCurrency(invoice.totalVat)}</span>
+                <span className="font-bold text-slate-900">TZS {formatCurrency(invoice.totalVat)}</span>
               </div>
               <div className="flex justify-between text-base font-extrabold text-slate-900 pt-3 border-t border-slate-300">
                 <span>Total Amount Due:</span>
-                <span className="text-emerald-700 font-mono text-xl">${formatCurrency(invoice.totalAfterVat)}</span>
+                <span className="text-emerald-700 font-mono text-xl">TZS {formatCurrency(invoice.totalAfterVat)}</span>
               </div>
             </div>
           </div>

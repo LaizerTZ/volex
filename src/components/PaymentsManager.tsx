@@ -58,6 +58,7 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
   const [allocations, setAllocations] = useState<{ [invoiceId: string]: number }>({});
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successPayment, setSuccessPayment] = useState<PaymentRecord | null>(null);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
   // Printing modal
   const [printingPayment, setPrintingPayment] = useState<PaymentRecord | null>(null);
@@ -127,7 +128,7 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
     const amount = isNaN(val) ? 0 : Math.max(0, val);
 
     if (amount > maxBalance) {
-      setErrorMessage(`Allocation ($${amount}) exceeds remaining unpaid balance ($${maxBalance}) for this invoice.`);
+      setErrorMessage(`Allocation (TZS ${amount.toLocaleString()}) exceeds remaining unpaid balance (TZS ${maxBalance.toLocaleString()}) for this invoice.`);
     } else {
       setErrorMessage(null);
     }
@@ -181,7 +182,7 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
     if (Math.abs(unallocatedDifference) > 0.01) {
       if (
         !window.confirm(
-          `Total allocated ($${formatCurrency(totalAllocatedAmount)}) does not match total amount paid ($${formatCurrency(rawEnteredTotal)}). Difference: $${formatCurrency(unallocatedDifference)}. Do you still want to proceed?`
+          `Total allocated (TZS ${formatCurrency(totalAllocatedAmount)}) does not match total amount paid (TZS ${formatCurrency(rawEnteredTotal)}). Difference: TZS ${formatCurrency(unallocatedDifference)}. Do you still want to proceed?`
         )
       ) {
         return;
@@ -240,6 +241,9 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
       createdAt: new Date().toISOString(),
     };
 
+    // Hide saving button to control double click
+    setIsSaving(true);
+
     const allUpdatedInvoices = invoices.map((inv) =>
       updatedInvoicesMap.has(inv.id) ? updatedInvoicesMap.get(inv.id)! : inv
     );
@@ -250,6 +254,15 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
     if (andPrint) {
       setPrintingPayment(newPaymentRecord);
     }
+
+    // Automatically open a new next record
+    setTimeout(() => {
+      setTotalAmountPaid('');
+      setAllocations({});
+      setNotes('');
+      setReferenceNumber(`TXN-${Date.now().toString().slice(-6)}`);
+      setIsSaving(false);
+    }, 400);
   };
 
   const handleStartNextPayment = () => {
@@ -268,7 +281,7 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
       'Payment Date': p.paymentDate,
       'Customer': p.customerName,
       'PO Reference': p.poNumber,
-      'Amount Paid ($)': p.amountPaid,
+      'Amount Paid (TZS)': p.amountPaid,
       'Payment Method': p.paymentMethod,
       'Ref / Check #': p.referenceNumber,
       'Deposit Account': p.depositAccount || '',
@@ -347,7 +360,7 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
                   Payment Receipt {successPayment.paymentNumber} Successfully Recorded!
                 </h3>
                 <p className="text-xs text-emerald-700 mt-0.5">
-                  Credited <span className="font-bold">${formatCurrency(successPayment.amountPaid)}</span> from <span className="font-bold">{successPayment.customerName}</span> across {successPayment.allocations?.length || 1} open invoices.
+                  Credited <span className="font-bold">TZS {formatCurrency(successPayment.amountPaid)}</span> from <span className="font-bold">{successPayment.customerName}</span> across {successPayment.allocations?.length || 1} open invoices.
                 </p>
               </div>
             </div>
@@ -392,7 +405,7 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5 flex items-center gap-1.5">
                   <DollarSign className="w-3.5 h-3.5 text-emerald-600" />
-                  Total Amount Paid ($) <span className="text-red-500">*</span>
+                  Total Amount Paid (TZS) <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="number"
@@ -498,14 +511,17 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
           {/* Step 3: Customer Pending Invoices Allocation Table */}
           {selectedCustomer && (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden space-y-4 p-5">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-slate-100">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-3 border-b border-slate-200">
                 <div>
                   <div className="flex items-center gap-2">
                     <h3 className="font-bold text-sm text-slate-900">
                       Pending Invoices for {selectedCustomer}
                     </h3>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 font-semibold">
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 font-semibold">
                       {customerPendingInvoices.length} invoices on file
+                    </span>
+                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-semibold">
+                      Allocated: TZS {formatCurrency(totalAllocatedAmount)}
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5">
@@ -513,23 +529,51 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
                     onClick={handleAutoAllocate}
-                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
-                    <Sparkles className="w-3.5 h-3.5" />
-                    Auto-Allocate Paid Total
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                    Auto-Allocate
                   </button>
                   <button
                     type="button"
                     onClick={handleClearAllocations}
-                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
                     Clear
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSavePayment(true)}
+                    disabled={totalAllocatedAmount <= 0 || isSaving}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    Save & Print
+                  </button>
+
+                  {/* Primary Save Button: Save Payment */}
+                  {!isSaving ? (
+                    <button
+                      type="button"
+                      onClick={() => handleSavePayment(false)}
+                      disabled={totalAllocatedAmount <= 0}
+                      className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-lg text-xs font-bold transition-all inline-flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
+                    >
+                      <Save className="w-4 h-4" />
+                      Save Payment
+                    </button>
+                  ) : (
+                    <div className="px-5 py-2 bg-emerald-700 text-white rounded-lg text-xs font-bold inline-flex items-center gap-2 shadow-xs cursor-not-allowed">
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Saving Payment...</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -544,7 +588,7 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
                       <th className="py-3 px-3 text-right">Invoice Total</th>
                       <th className="py-3 px-3 text-right">Previously Paid</th>
                       <th className="py-3 px-3 text-right text-amber-300">Remaining Balance</th>
-                      <th className="py-3 px-3 text-right w-48 bg-emerald-950/60">Amount Allocated ($)</th>
+                      <th className="py-3 px-3 text-right w-48 bg-emerald-950/60">Amount Allocated (TZS)</th>
                       <th className="py-3 px-3 text-center">Status After</th>
                     </tr>
                   </thead>
@@ -573,9 +617,9 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
                             <td className="py-3 px-3 font-mono font-bold text-slate-900">{inv.invoiceNumber}</td>
                             <td className="py-3 px-3 text-slate-600">{inv.invoiceDate}</td>
                             <td className="py-3 px-3 font-mono text-slate-700">{inv.poNumber}</td>
-                            <td className="py-3 px-3 text-right font-semibold text-slate-800">${formatCurrency(inv.totalAfterVat)}</td>
-                            <td className="py-3 px-3 text-right text-slate-500">${formatCurrency(prevPaid)}</td>
-                            <td className="py-3 px-3 text-right font-bold text-amber-700">${formatCurrency(unpaidBalance)}</td>
+                            <td className="py-3 px-3 text-right font-semibold text-slate-800">TZS {formatCurrency(inv.totalAfterVat)}</td>
+                            <td className="py-3 px-3 text-right text-slate-500">TZS {formatCurrency(prevPaid)}</td>
+                            <td className="py-3 px-3 text-right font-bold text-amber-700">TZS {formatCurrency(unpaidBalance)}</td>
                             <td className="py-2 px-3 text-right bg-emerald-50/30">
                               <div className="flex items-center justify-end gap-1">
                                 <input
@@ -605,7 +649,7 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
                                 </span>
                               ) : allocated > 0 ? (
                                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">
-                                  Partial (${formatCurrency(finalBalance)} bal)
+                                  Partial (TZS {formatCurrency(finalBalance)} bal)
                                 </span>
                               ) : (
                                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">
@@ -639,32 +683,41 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
                 <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 space-y-3 text-xs">
                   <div className="flex justify-between text-slate-600">
                     <span>Total Amount Paid Entered:</span>
-                    <span className="font-mono font-bold text-slate-900">${formatCurrency(rawEnteredTotal)}</span>
+                    <span className="font-mono font-bold text-slate-900">TZS {formatCurrency(rawEnteredTotal)}</span>
                   </div>
                   <div className="flex justify-between text-slate-600">
                     <span>Total Allocated to Invoices:</span>
-                    <span className="font-mono font-bold text-emerald-700">${formatCurrency(totalAllocatedAmount)}</span>
+                    <span className="font-mono font-bold text-emerald-700">TZS {formatCurrency(totalAllocatedAmount)}</span>
                   </div>
                   <div className="flex justify-between font-bold border-t border-slate-200 pt-2 text-slate-800">
                     <span>Unallocated Balance:</span>
                     <span className={`font-mono ${unallocatedDifference !== 0 ? 'text-amber-700' : 'text-emerald-700'}`}>
-                      ${formatCurrency(unallocatedDifference)}
+                      TZS {formatCurrency(unallocatedDifference)}
                     </span>
                   </div>
 
                   <div className="pt-2 flex flex-col gap-2">
-                    <button
-                      type="button"
-                      onClick={() => handleSavePayment(false)}
-                      className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold inline-flex items-center justify-center gap-2 shadow-sm transition-colors cursor-pointer"
-                    >
-                      <Save className="w-4 h-4" />
-                      Save Payment Allocation
-                    </button>
+                    {!isSaving ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSavePayment(false)}
+                        disabled={totalAllocatedAmount <= 0}
+                        className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white rounded-xl text-xs font-bold inline-flex items-center justify-center gap-2 shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        <Save className="w-4 h-4" />
+                        Save Payment
+                      </button>
+                    ) : (
+                      <div className="w-full py-2.5 bg-emerald-700 text-white rounded-xl text-xs font-bold inline-flex items-center justify-center gap-2 shadow-xs cursor-not-allowed">
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Saving Payment...</span>
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleSavePayment(true)}
-                      className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                      disabled={totalAllocatedAmount <= 0 || isSaving}
+                      className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
                     >
                       <Printer className="w-4 h-4" />
                       Save & Print Official Receipt
@@ -740,7 +793,7 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
                         <td className="py-3 px-3 font-mono text-slate-700">{pay.poNumber}</td>
                         <td className="py-3 px-3 text-slate-600">{pay.paymentMethod}</td>
                         <td className="py-3 px-3 font-mono text-slate-600">{pay.referenceNumber}</td>
-                        <td className="py-3 px-3 text-right font-mono font-bold text-emerald-800">${formatCurrency(pay.amountPaid)}</td>
+                        <td className="py-3 px-3 text-right font-mono font-bold text-emerald-800">TZS {formatCurrency(pay.amountPaid)}</td>
                         <td className="py-3 px-3 text-center">
                           <button
                             type="button"

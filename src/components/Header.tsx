@@ -17,15 +17,18 @@ import {
   Shield,
   Mic,
   Sparkles,
-  FileText
+  FileText,
+  AlertTriangle
 } from 'lucide-react';
 import { AppUser, GoogleSheetsConfig } from '../types';
+import { canViewScreen, canEditScreen, isAdminUser, canExportDatabase } from '../utils/authService';
 
 export type ActiveTab = 
   | 'dashboard' 
   | 'po_master' 
   | 'create_invoice' 
   | 'invoices_db' 
+  | 'issue_tracking'
   | 'delivery_notes' 
   | 'matching_report' 
   | 'payments' 
@@ -38,10 +41,12 @@ interface HeaderProps {
   totalPOsCount: number;
   totalInvoicesCount: number;
   totalDNsCount?: number;
+  pendingIssuesCount?: number;
   onOpenNewInvoice: () => void;
   onOpenMasterExport?: () => void;
   onOpenVoiceSearch?: () => void;
   onOpenAutoReport?: () => void;
+  onOpenPinLogin?: () => void;
   sheetsConfig?: GoogleSheetsConfig;
   currentUser?: AppUser;
 }
@@ -52,10 +57,12 @@ export const Header: React.FC<HeaderProps> = ({
   totalPOsCount,
   totalInvoicesCount,
   totalDNsCount = 0,
+  pendingIssuesCount = 0,
   onOpenNewInvoice,
   onOpenMasterExport,
   onOpenVoiceSearch,
   onOpenAutoReport,
+  onOpenPinLogin,
   sheetsConfig,
   currentUser,
 }) => {
@@ -71,17 +78,23 @@ export const Header: React.FC<HeaderProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onOpenVoiceSearch]);
 
-  const navItems: { id: ActiveTab; label: string; icon: React.ElementType; badge?: number }[] = [
+  const isAdmin = isAdminUser(currentUser);
+  const canExport = canExportDatabase(currentUser);
+
+  const allNavItems: { id: ActiveTab; label: string; icon: React.ElementType; badge?: number }[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'po_master', label: 'PO Master Data', icon: FileSpreadsheet, badge: totalPOsCount },
     { id: 'create_invoice', label: 'Record Invoice', icon: ReceiptText },
     { id: 'invoices_db', label: 'Invoiced PO Database', icon: Database, badge: totalInvoicesCount },
+    { id: 'issue_tracking', label: 'Issue Resolution', icon: AlertTriangle, badge: pendingIssuesCount },
     { id: 'delivery_notes', label: 'Delivery Notes', icon: Truck, badge: totalDNsCount },
     { id: 'matching_report', label: 'Matching & Audit', icon: GitCompare },
     { id: 'payments', label: 'Payments', icon: CreditCard },
-    { id: 'settings', label: 'Settings & Cloud DB', icon: Settings },
+    ...(isAdmin ? [{ id: 'settings' as ActiveTab, label: 'Settings & Cloud DB', icon: Settings }] : []),
     { id: 'ledger', label: 'PO Tracking Ledger', icon: Scale },
   ];
+
+  const navItems = allNavItems.filter((item) => canViewScreen(currentUser, item.id));
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-slate-100 sticky top-0 z-40 shadow-md">
@@ -148,38 +161,49 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-            {onOpenMasterExport && (
+            {onOpenMasterExport && isAdmin && (
               <button
                 type="button"
                 onClick={onOpenMasterExport}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-200 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 border border-slate-700 rounded-lg transition-colors cursor-pointer"
-                title="Export All Details & Data Suites"
+                title="Master Database Export (Admin Only)"
               >
                 <Download className="w-3.5 h-3.5 text-blue-400" />
                 <span className="hidden lg:inline">Export All</span>
               </button>
             )}
 
-            <button
-              onClick={onOpenNewInvoice}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 active:bg-blue-700 rounded-lg shadow-sm transition-colors cursor-pointer"
-            >
-              <PlusCircle className="w-3.5 h-3.5" />
-              <span>Record Invoice</span>
-            </button>
+            {canEditScreen(currentUser, 'create_invoice') && (
+              <button
+                onClick={onOpenNewInvoice}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 active:bg-blue-700 rounded-lg shadow-sm transition-colors cursor-pointer"
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                <span>Record Invoice</span>
+              </button>
+            )}
 
             {currentUser && (
               <button
                 type="button"
-                onClick={() => setActiveTab('settings')}
-                className="hidden xl:flex items-center gap-2 pl-2 pr-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs text-slate-300 cursor-pointer"
-                title={`Signed in as ${currentUser.name} (${currentUser.role})`}
+                onClick={onOpenPinLogin}
+                className="flex items-center gap-2 pl-2 pr-2.5 py-1 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 border border-slate-700 rounded-lg text-xs text-slate-300 transition-colors cursor-pointer"
+                title={`Signed in as ${currentUser.name} (${currentUser.role}) • Click to switch user or enter 4-digit PIN`}
               >
-                <div className="w-5 h-5 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-[10px]">
+                <div className={`w-5 h-5 rounded-full text-white font-bold flex items-center justify-center text-[10px] ${
+                  currentUser.status === 'On Hold' ? 'bg-amber-600' : 'bg-blue-600'
+                }`}>
                   {currentUser.name.slice(0, 1).toUpperCase()}
                 </div>
-                <span className="font-semibold text-slate-200 max-w-[90px] truncate">{currentUser.name}</span>
-                <span className="text-[10px] text-slate-400">({currentUser.role.split(' ')[0]})</span>
+                <div className="flex flex-col text-left">
+                  <span className="font-semibold text-slate-200 max-w-[90px] truncate leading-tight">{currentUser.name}</span>
+                  <span className="text-[10px] text-slate-400 leading-tight">({currentUser.role.split(' ')[0]})</span>
+                </div>
+                {currentUser.status === 'On Hold' && (
+                  <span className="text-[9px] px-1 py-0.2 bg-amber-500/20 text-amber-300 rounded border border-amber-500/40 font-bold">
+                    HOLD
+                  </span>
+                )}
               </button>
             )}
           </div>

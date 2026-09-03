@@ -58,6 +58,7 @@ export const exportMasterExcelWorkbook = (
     'Delivered Quantity': line.deliveredQuantity || 0,
     'Undelivered Qty': line.undeliveredQuantity ?? Math.max(0, line.quantity - (line.deliveredQuantity || 0)),
     'Line Status': line.status || 'UNINVOICED',
+    'Delivery Notes / Remarks': line.remarks || '',
   }));
   const poSheet = XLSX.utils.json_to_sheet(poData);
   XLSX.utils.book_append_sheet(workbook, poSheet, '1_PO_Lines');
@@ -84,8 +85,10 @@ export const exportMasterExcelWorkbook = (
 
   // 3. Invoice Items Breakdown
   const invItemsData: any[] = [];
-  invoices.forEach((inv) => {
-    inv.lines.forEach((l, idx) => {
+  (invoices || []).forEach((inv) => {
+    if (!inv) return;
+    (inv.lines || []).forEach((l, idx) => {
+      if (!l) return;
       invItemsData.push({
         'Invoice #': inv.invoiceNumber,
         'Item #': idx + 1,
@@ -105,7 +108,7 @@ export const exportMasterExcelWorkbook = (
   XLSX.utils.book_append_sheet(workbook, invItemsSheet, '3_Invoice_Line_Items');
 
   // 4. Delivery Notes Summary
-  const dnData = deliveryNotes.map((dn, idx) => ({
+  const dnData = (deliveryNotes || []).map((dn, idx) => ({
     '#': idx + 1,
     'Delivery Note #': dn.deliveryNoteNumber,
     'Delivery Date': dn.deliveryDate,
@@ -125,8 +128,10 @@ export const exportMasterExcelWorkbook = (
 
   // 5. Delivery Items Breakdown
   const dnItemsData: any[] = [];
-  deliveryNotes.forEach((dn) => {
-    dn.lines.forEach((l, idx) => {
+  (deliveryNotes || []).forEach((dn) => {
+    if (!dn) return;
+    (dn.lines || []).forEach((l, idx) => {
+      if (!l) return;
       dnItemsData.push({
         'Delivery Note #': dn.deliveryNoteNumber,
         'Item #': idx + 1,
@@ -144,7 +149,7 @@ export const exportMasterExcelWorkbook = (
   XLSX.utils.book_append_sheet(workbook, dnItemsSheet, '5_Delivery_Items');
 
   // 6. Payments & Remittances
-  const payData = payments.map((p, idx) => ({
+  const payData = (payments || []).map((p, idx) => ({
     '#': idx + 1,
     'Payment Receipt #': p.paymentNumber,
     'Payment Date': p.paymentDate,
@@ -163,8 +168,10 @@ export const exportMasterExcelWorkbook = (
 
   // 7. Payment Allocations Detail
   const allocData: any[] = [];
-  payments.forEach((p) => {
+  (payments || []).forEach((p) => {
+    if (!p) return;
     (p.allocations || []).forEach((al, idx) => {
+      if (!al) return;
       allocData.push({
         'Payment #': p.paymentNumber,
         'Allocation #': idx + 1,

@@ -132,8 +132,8 @@ export const DeliveryNotePrintModal: React.FC<DeliveryNotePrintModalProps> = ({
                     <td className="py-3 px-2 text-center font-mono text-slate-600">{line.unitOfMeasure}</td>
                     <td className="py-3 px-3 text-right text-slate-500">{line.poQuantity}</td>
                     <td className="py-3 px-3 text-right font-bold text-indigo-700 bg-indigo-50/40">{line.deliveredQuantity}</td>
-                    <td className="py-3 px-3 text-right text-slate-700">${formatCurrency(line.unitPrice)}</td>
-                    <td className="py-3 px-3 text-right font-bold text-slate-900">${formatCurrency(line.valueAfterVat)}</td>
+                    <td className="py-3 px-3 text-right text-slate-700">TZS {formatCurrency(line.unitPrice)}</td>
+                    <td className="py-3 px-3 text-right font-bold text-slate-900">TZS {formatCurrency(line.valueAfterVat)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -167,7 +167,7 @@ export const DeliveryNotePrintModal: React.FC<DeliveryNotePrintModalProps> = ({
               </div>
               <div className="border-t border-slate-300 pt-2 flex justify-between text-sm font-bold text-indigo-900">
                 <span>Total Delivered Value:</span>
-                <span className="font-mono text-base">${formatCurrency(deliveryNote.totalDeliveredValue)}</span>
+                <span className="font-mono text-base">TZS {formatCurrency(deliveryNote.totalDeliveredValue)}</span>
               </div>
             </div>
           </div>

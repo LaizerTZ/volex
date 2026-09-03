@@ -133,9 +133,9 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
                         <td className="py-2.5 px-3 text-slate-400 font-mono">{idx + 1}</td>
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-900">{alloc.invoiceNumber}</td>
                         <td className="py-2.5 px-3 font-mono text-slate-700">{alloc.poNumber}</td>
-                        <td className="py-2.5 px-3 text-right text-slate-700">${formatCurrency(alloc.invoiceTotal)}</td>
-                        <td className="py-2.5 px-3 text-right text-slate-500">${formatCurrency(alloc.alreadyPaid)}</td>
-                        <td className="py-2.5 px-3 text-right font-bold text-emerald-700 bg-emerald-50/40">${formatCurrency(alloc.allocatedAmount)}</td>
+                        <td className="py-2.5 px-3 text-right text-slate-700">TZS {formatCurrency(alloc.invoiceTotal)}</td>
+                        <td className="py-2.5 px-3 text-right text-slate-500">TZS {formatCurrency(alloc.alreadyPaid)}</td>
+                        <td className="py-2.5 px-3 text-right font-bold text-emerald-700 bg-emerald-50/40">TZS {formatCurrency(alloc.allocatedAmount)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -158,7 +158,7 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
               <span className="text-xs text-emerald-700">Official funds credited to company account</span>
             </div>
             <div className="text-3xl font-black text-emerald-950 font-mono">
-              ${formatCurrency(payment.amountPaid)}
+              TZS {formatCurrency(payment.amountPaid)}
             </div>
           </div>
 

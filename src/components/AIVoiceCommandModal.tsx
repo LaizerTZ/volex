@@ -252,7 +252,7 @@ export const AIVoiceCommandModal: React.FC<AIVoiceCommandModalProps> = ({
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={isListening ? 'Listening to your voice command...' : 'e.g. "Find POs for vendor Acme with balance > $10,000"'}
+              placeholder={isListening ? 'Listening to your voice command...' : 'e.g. "Find POs for vendor Acme with balance > TZS 10,000,000"'}
               className={`w-full bg-slate-900 border text-slate-100 placeholder-slate-500 text-sm sm:text-base rounded-xl pl-12 pr-28 py-3.5 focus:outline-none transition-all ${
                 isListening 
                   ? 'border-blue-500 ring-2 ring-blue-500/30 bg-blue-950/20' 

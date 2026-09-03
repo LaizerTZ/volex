@@ -1,6 +1,6 @@
 {
-  "name": "FAMOLA Excel Ninja",
-  "description": "Enterprise Purchase Order Excel Parser, 3-Way Reconciliation, AI Voice Search, Partial Invoicing, Auto Report Generator & Cloud DB System",
+  "name": "Famola excel ninja",
+  "description": "Enterprise Purchase Order Excel Parser, Customer Series Books, 3-Way Reconciliation, Partial Invoicing, Auto Report Generator & Cloud DB System",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

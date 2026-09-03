@@ -88,10 +88,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
   // Delivery Notes summary per vendor
   const vendorDnStats = useMemo(() => {
     const map = new Map<string, { totalDnVal: number; totalDeliveredQty: number; dnCount: number }>();
-    deliveryNotes.forEach((dn) => {
+    (deliveryNotes || []).forEach((dn) => {
+      if (!dn) return;
       const existing = map.get(dn.customerName) || { totalDnVal: 0, totalDeliveredQty: 0, dnCount: 0 };
-      existing.totalDnVal += dn.totalDeliveredValue;
-      existing.totalDeliveredQty += dn.totalDeliveredQuantity;
+      existing.totalDnVal += dn.totalDeliveredValue || 0;
+      existing.totalDeliveredQty += dn.totalDeliveredQuantity || 0;
       existing.dnCount += 1;
       map.set(dn.customerName, existing);
     });
@@ -130,12 +131,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const toggleAllGroups = (expand: boolean) => {
     const next: Record<string, boolean> = {};
     if (groupingMode === 'PO') {
-      poReconciliationGroups.forEach((g) => {
-        next[g.poNumber] = expand;
+      (poReconciliationGroups || []).forEach((g) => {
+        if (g && g.poNumber) next[g.poNumber] = expand;
       });
     } else if (groupingMode === 'VENDOR') {
-      vendorReconciliationGroups.forEach((g) => {
-        next[g.vendor] = expand;
+      (vendorReconciliationGroups || []).forEach((g) => {
+        if (g && g.vendor) next[g.vendor] = expand;
       });
     }
     setExpandedKeys(next);
@@ -143,22 +144,23 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Filtered matching items based on search and status
   const filteredMatchingData = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
-    return matchingData.filter((item) => {
+    const q = (searchQuery || '').toLowerCase().trim();
+    return (matchingData || []).filter((item) => {
+      if (!item) return false;
       const matchesSearch =
         !q ||
-        item.poNumber.toLowerCase().includes(q) ||
-        item.customerName.toLowerCase().includes(q) ||
-        item.itemDescription.toLowerCase().includes(q) ||
-        item.destination.toLowerCase().includes(q) ||
-        item.contract.toLowerCase().includes(q);
+        (item.poNumber || '').toLowerCase().includes(q) ||
+        (item.customerName || '').toLowerCase().includes(q) ||
+        (item.itemDescription || '').toLowerCase().includes(q) ||
+        (item.destination || '').toLowerCase().includes(q) ||
+        (item.contract || '').toLowerCase().includes(q);
 
       if (!matchesSearch) return false;
 
       if (statusFilter === 'MATCHED') return item.status === 'FULLY_MATCHED';
       if (statusFilter === 'PARTIAL') return item.status === 'PARTIALLY_MATCHED';
-      if (statusFilter === 'UNMATCHED') return item.unmatchedQty > 0;
-      if (statusFilter === 'UNDELIVERED') return item.undeliveredQty > 0;
+      if (statusFilter === 'UNMATCHED') return (item.unmatchedQty || 0) > 0;
+      if (statusFilter === 'UNDELIVERED') return (item.undeliveredQty || 0) > 0;
 
       return true;
     });
@@ -183,7 +185,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
       totalUndeliveredQty: number;
     }>();
 
-    filteredMatchingData.forEach((item) => {
+    (filteredMatchingData || []).forEach((item) => {
+      if (!item || !item.poNumber) return;
       const existing = groupsMap.get(item.poNumber) || {
         poNumber: item.poNumber,
         customerName: item.customerName,
@@ -202,14 +205,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
       };
 
       existing.items.push(item);
-      existing.totalPoQty += item.poQuantity;
-      existing.totalPoVal += item.poTotalValue;
-      existing.totalDeliveredQty += item.deliveredQuantity;
-      existing.totalDeliveredVal += item.deliveredValue;
-      existing.totalInvoicedQty += item.invoicedQuantity;
-      existing.totalInvoicedVal += item.invoicedValue;
-      existing.totalUnmatchedQty += item.unmatchedQty;
-      existing.totalUndeliveredQty += item.undeliveredQty;
+      existing.totalPoQty += item.poQuantity || 0;
+      existing.totalPoVal += item.poTotalValue || 0;
+      existing.totalDeliveredQty += item.deliveredQuantity || 0;
+      existing.totalDeliveredVal += item.deliveredValue || 0;
+      existing.totalInvoicedQty += item.invoicedQuantity || 0;
+      existing.totalInvoicedVal += item.invoicedValue || 0;
+      existing.totalUnmatchedQty += item.unmatchedQty || 0;
+      existing.totalUndeliveredQty += item.undeliveredQty || 0;
 
       groupsMap.set(item.poNumber, existing);
     });
@@ -250,7 +253,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
       totalUndeliveredQty: number;
     }>();
 
-    filteredMatchingData.forEach((item) => {
+    (filteredMatchingData || []).forEach((item) => {
+      if (!item || !item.customerName) return;
       const existing = groupsMap.get(item.customerName) || {
         vendor: item.customerName,
         poNumbersSet: new Set<string>(),
@@ -267,14 +271,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       existing.poNumbersSet.add(item.poNumber);
       existing.items.push(item);
-      existing.totalPoQty += item.poQuantity;
-      existing.totalPoVal += item.poTotalValue;
-      existing.totalDeliveredQty += item.deliveredQuantity;
-      existing.totalDeliveredVal += item.deliveredValue;
-      existing.totalInvoicedQty += item.invoicedQuantity;
-      existing.totalInvoicedVal += item.invoicedValue;
-      existing.totalUnmatchedQty += item.unmatchedQty;
-      existing.totalUndeliveredQty += item.undeliveredQty;
+      existing.totalPoQty += item.poQuantity || 0;
+      existing.totalPoVal += item.poTotalValue || 0;
+      existing.totalDeliveredQty += item.deliveredQuantity || 0;
+      existing.totalDeliveredVal += item.deliveredValue || 0;
+      existing.totalInvoicedQty += item.invoicedQuantity || 0;
+      existing.totalInvoicedVal += item.invoicedValue || 0;
+      existing.totalUnmatchedQty += item.unmatchedQty || 0;
+      existing.totalUndeliveredQty += item.undeliveredQty || 0;
 
       groupsMap.set(item.customerName, existing);
     });
@@ -379,7 +383,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
             <div className="mt-3">
               <div className="text-2xl font-black text-slate-900 font-mono">
-                ${formatCurrency(metrics.totalPoValue)}
+                TZS {formatCurrency(metrics.totalPoValue)}
               </div>
               <div className="text-xs text-slate-600 font-semibold mt-1 flex items-center gap-2">
                 <span className="text-blue-600 font-bold">{metrics.totalPOs} Total POs</span>
@@ -410,7 +414,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
             <div className="mt-3">
               <div className="text-2xl font-black text-emerald-700 font-mono">
-                ${formatCurrency(metrics.totalInvoicedValue)}
+                TZS {formatCurrency(metrics.totalInvoicedValue)}
               </div>
               <div className="text-xs text-slate-600 font-semibold mt-1 flex items-center gap-2">
                 <span className="text-emerald-600 font-bold">{metrics.totalInvoicesCount} Invoices</span>
@@ -441,7 +445,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
             <div className="mt-3">
               <div className="text-2xl font-black text-indigo-700 font-mono">
-                ${formatCurrency(metrics.totalDeliveredValue)}
+                TZS {formatCurrency(metrics.totalDeliveredValue)}
               </div>
               <div className="text-xs text-slate-600 font-semibold mt-1 flex items-center gap-2">
                 <span className="text-indigo-600 font-bold">{metrics.totalDeliveryNotesCount} Delivery Notes</span>
@@ -472,10 +476,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
             </div>
             <div className="mt-3">
               <div className="text-2xl font-black text-slate-900 font-mono">
-                ${formatCurrency(metrics.totalPaymentsReceived)}
+                TZS {formatCurrency(metrics.totalPaymentsReceived)}
               </div>
               <div className="text-xs text-slate-600 font-semibold mt-1 flex items-center justify-between">
-                <span className="text-amber-700 font-medium">Unpaid: ${formatCurrency(metrics.totalOutstandingPayments)}</span>
+                <span className="text-amber-700 font-medium">Unpaid: TZS {formatCurrency(metrics.totalOutstandingPayments)}</span>
                 <span className="font-bold text-emerald-600">
                   {metrics.totalInvoicedValue > 0 ? Math.round((metrics.totalPaymentsReceived / metrics.totalInvoicedValue) * 100) : 0}% Paid
                 </span>
@@ -756,7 +760,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <span>{poGroup.items.length} Line Items</span>
                             <span>•</span>
                             <span>
-                              Ordered: <strong className="text-slate-800">{poGroup.totalPoQty.toLocaleString()} units</strong> (${formatCurrency(poGroup.totalPoVal)})
+                              Ordered: <strong className="text-slate-800">{poGroup.totalPoQty.toLocaleString()} units</strong> (TZS {formatCurrency(poGroup.totalPoVal)})
                             </span>
                             <span>•</span>
                             <span>
@@ -764,7 +768,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             </span>
                             <span>•</span>
                             <span>
-                              Invoiced: <strong className="text-emerald-700">{poGroup.totalInvoicedQty.toLocaleString()} units</strong> (${formatCurrency(poGroup.totalInvoicedVal)})
+                              Invoiced: <strong className="text-emerald-700">{poGroup.totalInvoicedQty.toLocaleString()} units</strong> (TZS {formatCurrency(poGroup.totalInvoicedVal)})
                             </span>
                           </div>
                         </div>
@@ -967,15 +971,15 @@ export const Dashboard: React.FC<DashboardProps> = ({
                             <span>{vGroup.items.length} Item Lines</span>
                             <span>•</span>
                             <span>
-                              Total PO Val: <strong className="text-slate-800">${formatCurrency(vGroup.totalPoVal)}</strong> ({vGroup.totalPoQty.toLocaleString()} units)
+                              Total PO Val: <strong className="text-slate-800">TZS {formatCurrency(vGroup.totalPoVal)}</strong> ({vGroup.totalPoQty.toLocaleString()} units)
                             </span>
                             <span>•</span>
                             <span>
-                              Delivered: <strong className="text-indigo-700">${formatCurrency(vGroup.totalDeliveredVal)}</strong>
+                              Delivered: <strong className="text-indigo-700">TZS {formatCurrency(vGroup.totalDeliveredVal)}</strong>
                             </span>
                             <span>•</span>
                             <span>
-                              Invoiced: <strong className="text-emerald-700">${formatCurrency(vGroup.totalInvoicedVal)}</strong>
+                              Invoiced: <strong className="text-emerald-700">TZS {formatCurrency(vGroup.totalInvoicedVal)}</strong>
                             </span>
                           </div>
                         </div>
@@ -1376,7 +1380,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     {selectedDrilldownItem.poQuantity} <span className="text-xs font-normal">{selectedDrilldownItem.unitOfMeasure}</span>
                   </div>
                   <div className="text-[11px] text-blue-700 mt-1">
-                    ${formatCurrency(selectedDrilldownItem.poTotalValue)}
+                    TZS {formatCurrency(selectedDrilldownItem.poTotalValue)}
                   </div>
                 </div>
 
@@ -1386,7 +1390,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     {selectedDrilldownItem.deliveredQuantity} <span className="text-xs font-normal">{selectedDrilldownItem.unitOfMeasure}</span>
                   </div>
                   <div className="text-[11px] text-indigo-700 mt-1">
-                    ${formatCurrency(selectedDrilldownItem.deliveredValue)}
+                    TZS {formatCurrency(selectedDrilldownItem.deliveredValue)}
                   </div>
                 </div>
 
@@ -1396,7 +1400,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     {selectedDrilldownItem.invoicedQuantity} <span className="text-xs font-normal">{selectedDrilldownItem.unitOfMeasure}</span>
                   </div>
                   <div className="text-[11px] text-emerald-700 mt-1">
-                    ${formatCurrency(selectedDrilldownItem.invoicedValue)}
+                    TZS {formatCurrency(selectedDrilldownItem.invoicedValue)}
                   </div>
                 </div>
               </div>

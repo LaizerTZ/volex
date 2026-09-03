@@ -132,19 +132,19 @@ export const POTrackingLedger: React.FC<POTrackingLedgerProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
           <div>
             <span className="text-slate-400 block text-[11px] uppercase">Total Master PO Volume</span>
-            <div className="text-xl font-bold mt-0.5">${formatCurrency(grandSummary.totalPoVal)}</div>
+            <div className="text-xl font-bold mt-0.5">TZS {formatCurrency(grandSummary.totalPoVal)}</div>
             <span className="text-slate-400">{poGroups.length} Purchase Orders</span>
           </div>
 
           <div>
             <span className="text-emerald-400 block text-[11px] uppercase">Total Billed Invoices</span>
-            <div className="text-xl font-bold text-emerald-400 mt-0.5">${formatCurrency(grandSummary.totalInvoicedVal)}</div>
+            <div className="text-xl font-bold text-emerald-400 mt-0.5">TZS {formatCurrency(grandSummary.totalInvoicedVal)}</div>
             <span className="text-slate-400">{invoices.length} Invoices Recorded</span>
           </div>
 
           <div>
             <span className="text-amber-400 block text-[11px] uppercase">Outstanding Remaining</span>
-            <div className="text-xl font-bold text-amber-400 mt-0.5">${formatCurrency(grandSummary.totalRemainingVal)}</div>
+            <div className="text-xl font-bold text-amber-400 mt-0.5">TZS {formatCurrency(grandSummary.totalRemainingVal)}</div>
             <span className="text-slate-400">Available to invoice</span>
           </div>
 
@@ -247,12 +247,12 @@ export const POTrackingLedger: React.FC<POTrackingLedgerProps> = ({
                   <div className="flex items-center justify-between md:justify-end gap-6 pl-8 md:pl-0">
                     <div className="text-left md:text-right">
                       <div className="text-xs text-slate-400">Total PO Value (Incl. VAT)</div>
-                      <div className="text-base font-bold text-slate-900">${formatCurrency(grp.totalValueAfterVat)}</div>
+                      <div className="text-base font-bold text-slate-900">TZS {formatCurrency(grp.totalValueAfterVat)}</div>
                     </div>
 
                     <div className="text-left md:text-right">
-                      <div className="text-xs text-emerald-600 font-semibold">Invoiced: ${formatCurrency(grp.invoicedValueAfterVat)}</div>
-                      <div className="text-xs text-amber-600 font-bold">Remaining: ${formatCurrency(grp.remainingValueAfterVat)}</div>
+                      <div className="text-xs text-emerald-600 font-semibold">Invoiced: TZS {formatCurrency(grp.invoicedValueAfterVat)}</div>
+                      <div className="text-xs text-amber-600 font-bold">Remaining: TZS {formatCurrency(grp.remainingValueAfterVat)}</div>
                     </div>
 
                     <button
@@ -306,8 +306,8 @@ export const POTrackingLedger: React.FC<POTrackingLedgerProps> = ({
                                 <td className="py-2 px-3 text-right font-bold text-amber-700">
                                   {l.remainingQuantity !== undefined ? l.remainingQuantity : l.quantity}
                                 </td>
-                                <td className="py-2 px-3 text-right text-slate-600">${formatCurrency(l.unitPrice)}</td>
-                                <td className="py-2 px-3 text-right font-bold text-slate-900">${formatCurrency(l.valueAfterVat)}</td>
+                                <td className="py-2 px-3 text-right text-slate-600">TZS {formatCurrency(l.unitPrice)}</td>
+                                <td className="py-2 px-3 text-right font-bold text-slate-900">TZS {formatCurrency(l.valueAfterVat)}</td>
                                 <td className="py-2 px-3 text-center">
                                   {l.status === 'FULLY_INVOICED' && (
                                     <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800">
@@ -361,7 +361,7 @@ export const POTrackingLedger: React.FC<POTrackingLedgerProps> = ({
 
                               <div className="flex items-center gap-3">
                                 <div className="text-right">
-                                  <div className="font-bold text-sm text-emerald-700">${formatCurrency(inv.totalAfterVat)}</div>
+                                  <div className="font-bold text-sm text-emerald-700">TZS {formatCurrency(inv.totalAfterVat)}</div>
                                   <div className="text-[10px] text-slate-400">Incl. VAT</div>
                                 </div>
                                 <button

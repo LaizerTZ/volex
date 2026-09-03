@@ -138,7 +138,7 @@ export const AIAutoReportModal: React.FC<AIAutoReportModalProps> = ({
     if (!report) return;
     const emailText = `EXECUTIVE REPORT: ${report.title}
 Generated: ${new Date(report.generatedAt).toLocaleString()}
-Scope: ${poGroups.length} Purchase Orders | Total Value: $${(metrics.totalPoValue || 0).toLocaleString()}
+Scope: ${poGroups.length} Purchase Orders | Total Value: TZS ${(metrics.totalPoValue || 0).toLocaleString()}
 
 EXECUTIVE SUMMARY:
 ${report.executiveSummary}

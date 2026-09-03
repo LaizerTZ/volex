@@ -1,4 +1,4 @@
-import { POLineItem } from '../types';
+import { POLineItem, DocumentIssueRecord } from '../types';
 
 export const INITIAL_PO_DATA: POLineItem[] = [
   // PO-2026-8801 - Acme Engineering Ltd (2 lines)
@@ -307,4 +307,153 @@ export const INITIAL_PAYMENTS: any[] = [
     createdAt: '2026-08-25T11:00:00.000Z',
   }
 ];
+
+export const INITIAL_DOCUMENT_ISSUES: DocumentIssueRecord[] = [
+  {
+    id: 'issue-inv-sample-1',
+    entityType: 'INVOICE',
+    entityId: 'inv-sample-1',
+    referenceNumber: 'INV-2026-001',
+    poNumber: 'PO-2026-8801',
+    customerName: 'Acme Engineering Ltd',
+    destination: 'Dar es Salaam Port - Site A',
+    contract: 'CNT-EAST-091',
+    totalValue: 44604.00,
+    issueTitle: 'Quantity mismatch on Steel Reinforcement Bars (Line #1)',
+    issueType: 'Quantity Discrepancy',
+    severity: 'HIGH',
+    status: 'PENDING',
+    flaggedBy: 'Billing Clerk (Audit)',
+    flaggedAt: '2026-08-23T14:15:00.000Z',
+    headerComment: 'Client procurement notified that Line 1 invoiced 30 tons, but gate delivery receipt shows only 25 tons unloaded.',
+    lineIssues: [
+      {
+        lineId: 'pol-sample-1',
+        itemDescription: 'High-Grade Steel Reinforcement Bars 16mm (Grade 500)',
+        unitOfMeasure: 'TONS',
+        poQuantity: 50,
+        billedOrDeliveredQuantity: 30,
+        unitPrice: 980.00,
+        valueAfterVat: 34692.00,
+        issueComment: 'Warehouse gate pass shows only 25 tons received on initial flatbed trailer. 5 tons remained in transit.',
+        workComment: 'Site supervisor verified gate delivery log. Recommends loading invoice and adjusting billed quantity from 30 to 25 tons.',
+        reviewerComment: '',
+        status: 'PENDING',
+      },
+      {
+        lineId: 'pol-sample-2',
+        itemDescription: 'Hydraulic Valve Assembly Type 4B Industrial Spec',
+        unitOfMeasure: 'PCS',
+        poQuantity: 20,
+        billedOrDeliveredQuantity: 20,
+        unitPrice: 420.00,
+        valueAfterVat: 9912.00,
+        issueComment: '',
+        workComment: 'Quantity and pricing verified correct (20 PCS delivered and verified).',
+        reviewerComment: '',
+        status: 'RESOLVED',
+      }
+    ],
+    comments: [
+      {
+        id: 'comm-1',
+        authorName: 'Billing Clerk (Audit)',
+        authorRole: 'Billing Clerk',
+        comment: 'Flagged after receipt of client discrepancy notice #ACME-DISC-091 regarding Line 1 tonnage.',
+        createdAt: '2026-08-23T14:15:00.000Z',
+        type: 'WORK_NOTE',
+      },
+      {
+        id: 'comm-2',
+        authorName: 'Finance Officer',
+        authorRole: 'Finance Officer',
+        comment: 'Spoke with logistics carrier. Second truck with 5 tons will arrive next week under separate delivery. Please reload this invoice, amend Line 1 to 25 tons, and re-save so client can pay the approved balance.',
+        createdAt: '2026-08-24T09:30:00.000Z',
+        type: 'WORK_NOTE',
+      }
+    ]
+  },
+  {
+    id: 'issue-dn-sample-2',
+    entityType: 'DELIVERY',
+    entityId: 'dn-sample-2',
+    referenceNumber: 'DN-2026-002',
+    poNumber: 'PO-2026-9042',
+    customerName: 'Global Mining & Energy Corp',
+    destination: 'Mwanza Goldfield Logistics Hub',
+    contract: 'CNT-MINE-442',
+    totalValue: 23895.00,
+    issueTitle: 'Missing manufacturer ISO quality certificate for Conveyor Belt',
+    issueType: 'Customer Query',
+    severity: 'MEDIUM',
+    status: 'UNDER_REVIEW',
+    flaggedBy: 'Logistics Manager',
+    flaggedAt: '2026-08-27T11:00:00.000Z',
+    headerComment: 'Site engineer requested manufacturer ISO testing certificate for conveyor belt before signing acceptance.',
+    lineIssues: [
+      {
+        lineId: 'pol-sample-3',
+        itemDescription: 'Heavy Duty Conveyor Belt 1200mm (50m roll EP400/3)',
+        unitOfMeasure: 'ROLLS',
+        poQuantity: 15,
+        billedOrDeliveredQuantity: 10,
+        unitPrice: 1450.00,
+        valueAfterVat: 17110.00,
+        issueComment: 'Quality certificate attachment pending from shipping supplier.',
+        workComment: 'Supplier emailed test certificate PDF. Sent to client site controller P. Kazimoto for review.',
+        reviewerComment: 'Awaiting site controller written confirmation to mark resolved.',
+        status: 'PENDING',
+      }
+    ],
+    comments: [
+      {
+        id: 'comm-dn-1',
+        authorName: 'Logistics Manager',
+        authorRole: 'Logistics Manager',
+        comment: 'Test certificate received from factory and transmitted to customer site team.',
+        createdAt: '2026-08-27T11:30:00.000Z',
+        type: 'WORK_NOTE',
+      },
+      {
+        id: 'comm-dn-2',
+        authorName: 'Auditor',
+        authorRole: 'Auditor',
+        comment: 'Put under review pending client written receipt confirmation.',
+        createdAt: '2026-08-27T14:00:00.000Z',
+        type: 'REVIEWER_NOTE',
+      }
+    ]
+  },
+  {
+    id: 'issue-pay-sample-1',
+    entityType: 'PAYMENT',
+    entityId: 'pay-sample-1',
+    referenceNumber: 'PAY-2026-001',
+    poNumber: 'PO-2026-8801',
+    customerName: 'Acme Engineering Ltd',
+    totalValue: 44604.00,
+    issueTitle: 'Bank SWIFT transaction reference verification',
+    issueType: 'Payment Mismatch',
+    severity: 'LOW',
+    status: 'RESOLVED',
+    flaggedBy: 'Finance Officer',
+    flaggedAt: '2026-08-25T15:00:00.000Z',
+    headerComment: 'Verify bank statement credit advice vs reference number TXN-STANBIC-9982104.',
+    lineIssues: [],
+    comments: [
+      {
+        id: 'comm-pay-1',
+        authorName: 'Finance Officer',
+        authorRole: 'Finance Officer',
+        comment: 'Stanbic Bank statement verified. Funds cleared in USD primary account.',
+        createdAt: '2026-08-26T08:00:00.000Z',
+        type: 'WORK_NOTE',
+      }
+    ],
+    resolvedBy: 'Admin',
+    resolvedAt: '2026-08-26T08:15:00.000Z',
+    resolutionNotes: 'Payment verified against bank statement. Cleared and reconciled.',
+  }
+];
+
 

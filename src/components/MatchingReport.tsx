@@ -214,7 +214,7 @@ export const MatchingReport: React.FC<MatchingReportProps> = ({
               {stats.totalPoQty.toLocaleString()} <span className="text-xs font-normal text-slate-500">Units</span>
             </div>
             <div className="text-xs text-slate-600 mt-1 font-medium">
-              Value: <span className="font-bold text-slate-800">${formatCurrency(stats.totalPoVal)}</span>
+              Value: <span className="font-bold text-slate-800">TZS {formatCurrency(stats.totalPoVal)}</span>
             </div>
           </div>
         </div>
@@ -230,7 +230,7 @@ export const MatchingReport: React.FC<MatchingReportProps> = ({
               {stats.totalDeliveredQty.toLocaleString()} <span className="text-xs font-normal text-indigo-500">Units</span>
             </div>
             <div className="text-xs text-slate-600 mt-1 flex justify-between">
-              <span>Val: ${formatCurrency(stats.totalDeliveredVal)}</span>
+              <span>Val: TZS {formatCurrency(stats.totalDeliveredVal)}</span>
               <span className="font-bold text-indigo-600">{stats.deliveryRate}% Received</span>
             </div>
           </div>
@@ -247,7 +247,7 @@ export const MatchingReport: React.FC<MatchingReportProps> = ({
               {stats.totalInvoicedQty.toLocaleString()} <span className="text-xs font-normal text-emerald-500">Units</span>
             </div>
             <div className="text-xs text-slate-600 mt-1 flex justify-between">
-              <span>Val: ${formatCurrency(stats.totalInvoicedVal)}</span>
+              <span>Val: TZS {formatCurrency(stats.totalInvoicedVal)}</span>
               <span className="font-bold text-emerald-600">{stats.matchRate}% Invoiced</span>
             </div>
           </div>
@@ -403,7 +403,7 @@ export const MatchingReport: React.FC<MatchingReportProps> = ({
                           {item.itemDescription}
                         </div>
                         <div className="text-[10px] text-slate-400 mt-0.5">
-                          Unit: ${formatCurrency(item.poUnitPrice)} • Dest: {item.destination}
+                          Unit: TZS {formatCurrency(item.poUnitPrice)} • Dest: {item.destination}
                         </div>
                       </td>
 
@@ -415,19 +415,19 @@ export const MatchingReport: React.FC<MatchingReportProps> = ({
                       {/* PO Ordered Qty */}
                       <td className="py-3 px-3 text-right font-bold text-slate-900">
                         {item.poQuantity.toLocaleString()}
-                        <div className="text-[10px] text-slate-400">${formatCurrency(item.poTotalValue)}</div>
+                        <div className="text-[10px] text-slate-400">TZS {formatCurrency(item.poTotalValue)}</div>
                       </td>
 
                       {/* Delivered Qty */}
                       <td className="py-3 px-3 text-right font-semibold text-indigo-700">
                         {item.deliveredQuantity.toLocaleString()}
-                        <div className="text-[10px] text-indigo-500">${formatCurrency(item.deliveredValue)}</div>
+                        <div className="text-[10px] text-indigo-500">TZS {formatCurrency(item.deliveredValue)}</div>
                       </td>
 
                       {/* Invoiced Qty */}
                       <td className="py-3 px-3 text-right font-bold text-emerald-700">
                         {item.invoicedQuantity.toLocaleString()}
-                        <div className="text-[10px] text-emerald-600">${formatCurrency(item.invoicedValue)}</div>
+                        <div className="text-[10px] text-emerald-600">TZS {formatCurrency(item.invoicedValue)}</div>
                       </td>
 
                       {/* Unmatched / Uninvoiced Qty */}
@@ -537,7 +537,7 @@ export const MatchingReport: React.FC<MatchingReportProps> = ({
                   </div>
                   <div>
                     <span className="text-slate-400 block text-[10px] uppercase font-bold">Unit Price</span>
-                    <span className="font-medium text-slate-800">${formatCurrency(drilldownItem.poUnitPrice)}</span>
+                    <span className="font-medium text-slate-800">TZS {formatCurrency(drilldownItem.poUnitPrice)}</span>
                   </div>
                   <div>
                     <span className="text-slate-400 block text-[10px] uppercase font-bold">UOM</span>
@@ -554,7 +554,7 @@ export const MatchingReport: React.FC<MatchingReportProps> = ({
                   <div className="text-xl font-bold text-blue-900 mt-1">
                     {drilldownItem.poQuantity} <span className="text-xs font-normal text-blue-700">{drilldownItem.unitOfMeasure}</span>
                   </div>
-                  <div className="text-[11px] text-blue-700 mt-0.5 font-medium">${formatCurrency(drilldownItem.poTotalValue)}</div>
+                  <div className="text-[11px] text-blue-700 mt-0.5 font-medium">TZS {formatCurrency(drilldownItem.poTotalValue)}</div>
                 </div>
 
                 {/* Received / Delivered */}
@@ -563,7 +563,7 @@ export const MatchingReport: React.FC<MatchingReportProps> = ({
                   <div className="text-xl font-bold text-indigo-900 mt-1">
                     {drilldownItem.deliveredQuantity} <span className="text-xs font-normal text-indigo-700">{drilldownItem.unitOfMeasure}</span>
                   </div>
-                  <div className="text-[11px] text-indigo-700 mt-0.5 font-medium">${formatCurrency(drilldownItem.deliveredValue)}</div>
+                  <div className="text-[11px] text-indigo-700 mt-0.5 font-medium">TZS {formatCurrency(drilldownItem.deliveredValue)}</div>
                 </div>
 
                 {/* Invoiced */}
@@ -572,7 +572,7 @@ export const MatchingReport: React.FC<MatchingReportProps> = ({
                   <div className="text-xl font-bold text-emerald-900 mt-1">
                     {drilldownItem.invoicedQuantity} <span className="text-xs font-normal text-emerald-700">{drilldownItem.unitOfMeasure}</span>
                   </div>
-                  <div className="text-[11px] text-emerald-700 mt-0.5 font-medium">${formatCurrency(drilldownItem.invoicedValue)}</div>
+                  <div className="text-[11px] text-emerald-700 mt-0.5 font-medium">TZS {formatCurrency(drilldownItem.invoicedValue)}</div>
                 </div>
               </div>
 

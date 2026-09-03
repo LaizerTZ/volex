@@ -14,6 +14,7 @@ export interface POLineItem {
   vatRate: number; // e.g. 0.18 for 18% or standard VAT
   vatAmount: number;
   valueAfterVat: number;
+  remarks?: string; // Delivery Notes / General Remarks (Optional)
   // Tracking fields calculated dynamically
   invoicedQuantity?: number;
   remainingQuantity?: number;
@@ -58,6 +59,7 @@ export interface InvoiceLineItem {
   vatAmount: number;
   valueAfterVat: number;
   isSelected: boolean;
+  comment?: string; // Line-level comment (default "Okay")
 }
 
 export interface InvoiceRecord {
@@ -76,7 +78,16 @@ export interface InvoiceRecord {
   paidAmount?: number;
   paymentStatus?: 'PAID' | 'PARTIAL' | 'UNPAID';
   notes?: string;
+  comment?: string; // Invoice-level comment (default "Okay", or "Cancelled", "No PO reference")
+  status?: 'ACTIVE' | 'CANCELLED';
+  isCancelled?: boolean;
+  cancelReason?: string;
+  hasIssue?: boolean;
+  issueId?: string;
+  issueStatus?: 'PENDING' | 'UNDER_REVIEW' | 'RESOLVED';
   createdAt: string;
+  updatedAt?: string;
+  lastModifiedBy?: string;
 }
 
 export interface DeliveryNoteLineItem {
@@ -116,6 +127,13 @@ export interface DeliveryNoteRecord {
   totalDeliveredValue: number;
   notes?: string;
   createdAt: string;
+  isCancelled?: boolean;
+  cancelReason?: string;
+  matchedInvoiceNumber?: string;
+  isFullyInvoiced?: boolean;
+  hasIssue?: boolean;
+  issueId?: string;
+  issueStatus?: 'PENDING' | 'UNDER_REVIEW' | 'RESOLVED';
 }
 
 export interface PaymentAllocationItem {
@@ -143,7 +161,68 @@ export interface PaymentRecord {
   depositAccount?: string;
   allocations?: PaymentAllocationItem[];
   notes?: string;
+  hasIssue?: boolean;
+  issueId?: string;
+  issueStatus?: 'PENDING' | 'UNDER_REVIEW' | 'RESOLVED';
   createdAt: string;
+}
+
+export interface LineItemIssue {
+  lineId: string;
+  itemDescription: string;
+  unitOfMeasure?: string;
+  poQuantity?: number;
+  billedOrDeliveredQuantity?: number;
+  unitPrice?: number;
+  valueAfterVat?: number;
+  issueComment: string; // The specific problem identified on this line
+  workComment?: string;  // Notes added by the assigned user working on it
+  reviewerComment?: string; // Reviewer feedback on this line
+  status?: 'PENDING' | 'RESOLVED';
+}
+
+export interface IssueDiscussionComment {
+  id: string;
+  authorName: string;
+  authorRole: string;
+  comment: string;
+  createdAt: string;
+  type: 'WORK_NOTE' | 'REVIEWER_NOTE' | 'RESOLUTION_NOTE';
+}
+
+export interface DocumentIssueRecord {
+  id: string;
+  entityType: 'INVOICE' | 'DELIVERY' | 'PAYMENT';
+  entityId: string;
+  referenceNumber: string; // e.g. "INV-2026-001", "CRU005", "DN-2026-001", "PAY-2026-001"
+  poNumber: string;
+  customerName: string;
+  destination?: string;
+  contract?: string;
+  totalValue?: number;
+  issueTitle: string;
+  issueType: 
+    | 'Quantity Discrepancy' 
+    | 'Pricing / Rate Error' 
+    | 'Missing Delivery Ref' 
+    | 'VAT / Calculation Error' 
+    | 'Wrong PO Reference' 
+    | 'Damaged / Rejected Goods' 
+    | 'Payment Mismatch' 
+    | 'Customer Query' 
+    | 'Other';
+  severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  status: 'PENDING' | 'UNDER_REVIEW' | 'RESOLVED';
+  flaggedBy: string;
+  flaggedAt: string;
+  headerComment: string; // Document-level issue comment
+  lineIssues: LineItemIssue[];
+  comments: IssueDiscussionComment[];
+  // Reviewer resolution
+  reviewComment?: string;
+  resolvedBy?: string;
+  resolvedAt?: string;
+  resolutionNotes?: string;
 }
 
 export interface NumberSeriesConfig {
@@ -155,10 +234,43 @@ export interface NumberSeriesConfig {
   autoIncrement: boolean;
 }
 
+export interface CustomerSeriesBook {
+  id: string;
+  customerName: string;
+  invoicePrefix: string;       // e.g. "CRU", "GRB"
+  invoiceStartNumber: number;  // e.g. 1
+  invoiceEndNumber: number;    // e.g. 200
+  invoiceCurrentNumber: number;// e.g. 1
+  deliveryPrefix: string;      // e.g. "CRU-DN" or "CRU"
+  deliveryStartNumber: number; // e.g. 1
+  deliveryEndNumber: number;   // e.g. 200
+  deliveryCurrentNumber: number;// e.g. 1
+  padding: number;             // e.g. 3 (CRU001)
+  description?: string;
+  updatedAt?: string;
+}
+
 export interface SeriesSettings {
   invoiceSeries: NumberSeriesConfig;
   deliverySeries: NumberSeriesConfig;
+  customerBooks?: CustomerSeriesBook[];
 }
+
+export type ScreenId = 
+  | 'dashboard' 
+  | 'po_master' 
+  | 'create_invoice' 
+  | 'invoices_db' 
+  | 'issue_tracking' 
+  | 'delivery_notes' 
+  | 'matching_report' 
+  | 'payments' 
+  | 'ledger' 
+  | 'settings';
+
+export type ScreenAccessLevel = 'none' | 'view' | 'edit';
+
+export type ScreenPermissions = Partial<Record<ScreenId, ScreenAccessLevel>>;
 
 export interface AppUser {
   id: string;
@@ -166,10 +278,12 @@ export interface AppUser {
   email: string;
   role: 'Admin' | 'Finance Officer' | 'Logistics Manager' | 'Billing Clerk' | 'Auditor';
   department: string;
-  status: 'Active' | 'Inactive';
+  status: 'Active' | 'On Hold' | 'Inactive';
   createdAt: string;
   lastLoginAt?: string;
   accessToken?: string;
+  pinCode?: string; // 4-digit PIN generated by Admin
+  screenPermissions?: ScreenPermissions;
 }
 
 export interface EmailAccessInvitation {

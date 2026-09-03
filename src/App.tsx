@@ -18,13 +18,17 @@ import { InvoicePrintModal } from './components/InvoicePrintModal';
 import { MasterExportModal } from './components/MasterExportModal';
 import { AIVoiceCommandModal } from './components/AIVoiceCommandModal';
 import { AIAutoReportModal } from './components/AIAutoReportModal';
+import { IssueResolutionHub } from './components/IssueResolutionHub';
+import { FlagIssueModal } from './components/FlagIssueModal';
+import { PinLoginModal } from './components/PinLoginModal';
 import { 
   POLineItem, 
   InvoiceRecord, 
   DeliveryNoteRecord, 
   PaymentRecord,
   AppUser,
-  GoogleSheetsConfig
+  GoogleSheetsConfig,
+  DocumentIssueRecord
 } from './types';
 import { 
   loadStoredPOs, 
@@ -35,6 +39,10 @@ import {
   saveDeliveryNotes,
   loadStoredPayments,
   savePayments,
+  loadStoredIssues,
+  saveIssues,
+  addOrUpdateIssue,
+  resolveDocumentIssue,
   loadStoredUsers,
   loadStoredSeriesConfig,
   enrichPOLinesWithTracking, 
@@ -44,9 +52,9 @@ import {
   clearAllData
 } from './utils/storage';
 import { parseExcelPOData, generateSampleExcelTemplate } from './utils/excelParser';
-import { getCurrentSessionUser, validateEmailAccessToken } from './utils/authService';
+import { getCurrentSessionUser, validateEmailAccessToken, canViewScreen } from './utils/authService';
 import { loadSheetsConfig, syncAllDataToGoogleSheets } from './utils/googleSheetsService';
-import { CheckCircle2, AlertCircle, X, Sparkles, Cloud, Mic } from 'lucide-react';
+import { CheckCircle2, AlertCircle, X, Sparkles, Cloud, Mic, AlertTriangle, ShieldAlert } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -54,9 +62,19 @@ export default function App() {
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [deliveryNotes, setDeliveryNotes] = useState<DeliveryNoteRecord[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [issues, setIssues] = useState<DocumentIssueRecord[]>([]);
+  const [isFlagModalOpen, setIsFlagModalOpen] = useState(false);
+  const [preselectedFlagEntity, setPreselectedFlagEntity] = useState<{
+    type: 'INVOICE' | 'DELIVERY' | 'PAYMENT';
+    invoice?: InvoiceRecord;
+    deliveryNote?: DeliveryNoteRecord;
+    payment?: PaymentRecord;
+  } | null>(null);
+
   const [matchingFilter, setMatchingFilter] = useState<'ALL' | 'UNMATCHED' | 'UNDELIVERED' | 'MATCHED'>('ALL');
 
   const [selectedPoForInvoice, setSelectedPoForInvoice] = useState<string>('');
+  const [editingInvoice, setEditingInvoice] = useState<InvoiceRecord | null>(null);
   const [printingInvoice, setPrintingInvoice] = useState<InvoiceRecord | null>(null);
   const [isMasterExportOpen, setIsMasterExportOpen] = useState(false);
 
@@ -68,6 +86,8 @@ export default function App() {
   // Authentication & Google Sheets state
   const [currentUser, setCurrentUser] = useState<AppUser>(() => getCurrentSessionUser());
   const [sheetsConfig, setSheetsConfig] = useState<GoogleSheetsConfig>(() => loadSheetsConfig());
+  const [isPinLoginOpen, setIsPinLoginOpen] = useState(false);
+  const [pinLoginTargetUser, setPinLoginTargetUser] = useState<AppUser | null>(null);
 
   // Notification Toast
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
@@ -84,6 +104,11 @@ export default function App() {
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('access_token');
     const email = urlParams.get('access_email');
+    const pinParam = urlParams.get('login');
+
+    if (pinParam === 'pin' || urlParams.get('pin_login') === 'true') {
+      setIsPinLoginOpen(true);
+    }
 
     if (token) {
       const authResult = validateEmailAccessToken(token, email);
@@ -104,14 +129,20 @@ export default function App() {
     const loadedInvoices = loadStoredInvoices();
     const loadedDNs = loadStoredDeliveryNotes();
     const loadedPayments = loadStoredPayments();
+    const loadedIssues = loadStoredIssues();
 
     setPoLines(loadedPOs);
     setInvoices(loadedInvoices);
     setDeliveryNotes(loadedDNs);
     setPayments(loadedPayments);
+    setIssues(loadedIssues);
     setSheetsConfig(loadSheetsConfig());
     setCurrentUser(getCurrentSessionUser());
   }, []);
+
+  const pendingIssuesCount = useMemo(() => {
+    return issues.filter((i) => i.status !== 'RESOLVED').length;
+  }, [issues]);
 
   // Compute enriched PO lines and grouped POs with real-time tracking
   const enrichedLines = useMemo(() => {
@@ -126,13 +157,18 @@ export default function App() {
     return calculateDashboardMetrics(poGroups, invoices, deliveryNotes, payments);
   }, [poGroups, invoices, deliveryNotes, payments]);
 
-  // Auto-sync helper to push state to Google Sheets if auto-sync is active
+  // Auto-sync helper to push state to Google Sheets if auto-sync is active (Admin only)
   const triggerAutoSyncIfEnabled = (
     newPOs = poLines,
     newInvoices = invoices,
     newDNs = deliveryNotes,
     newPayments = payments
   ) => {
+    // Only Admin can write or sync directly to Google Sheets database
+    if (currentUser?.role !== 'Admin') {
+      return;
+    }
+
     const cfg = loadSheetsConfig();
     if (cfg.isConnected && cfg.autoSync && cfg.accessToken) {
       syncAllDataToGoogleSheets(
@@ -175,13 +211,178 @@ export default function App() {
     }
   };
 
-  // Handle saving an Invoice
+  // Handle saving an Invoice (Supports create and admin correction/reload)
   const handleSaveInvoice = (newInvoice: InvoiceRecord) => {
-    const updatedInvoices = [newInvoice, ...invoices];
+    const existingIndex = invoices.findIndex(
+      (i) => i.id === newInvoice.id || i.invoiceNumber.trim().toLowerCase() === newInvoice.invoiceNumber.trim().toLowerCase()
+    );
+    let updatedInvoices: InvoiceRecord[];
+    if (existingIndex >= 0) {
+      updatedInvoices = [...invoices];
+      updatedInvoices[existingIndex] = newInvoice;
+    } else {
+      updatedInvoices = [newInvoice, ...invoices];
+    }
     setInvoices(updatedInvoices);
     saveInvoices(updatedInvoices);
+    setEditingInvoice(null);
     triggerAutoSyncIfEnabled(poLines, updatedInvoices, deliveryNotes, payments);
-    showToast('success', `Invoice "${newInvoice.invoiceNumber}" saved and recorded to database.`);
+
+    // If this invoice had an active issue, automatically resolve it!
+    const linkedIssue = issues.find(
+      (i) => (i.entityId === newInvoice.id || i.referenceNumber.trim().toLowerCase() === newInvoice.invoiceNumber.trim().toLowerCase()) && i.status !== 'RESOLVED'
+    );
+
+    if (linkedIssue) {
+      const resName = currentUser?.name ? `${currentUser.name} (${currentUser.role})` : 'Administrator / Reviewer';
+      const updatedIss = resolveDocumentIssue(
+        linkedIssue.id,
+        resName,
+        `Invoice reloaded and corrected in Invoice Creator. Values and lines updated and verified.`
+      );
+      setIssues(updatedIss);
+      showToast('success', `Invoice "${newInvoice.invoiceNumber}" updated. Issue marked as RESOLVED and moved out of active issues!`);
+    } else {
+      showToast('success', `Invoice "${newInvoice.invoiceNumber}" saved and recorded to database.`);
+    }
+  };
+
+  // Issue Management Handlers
+  const handleSaveIssue = (newIssue: DocumentIssueRecord) => {
+    const updated = addOrUpdateIssue(newIssue);
+    setIssues(updated);
+
+    // Update document if invoice
+    if (newIssue.entityType === 'INVOICE') {
+      const updatedInvoices = invoices.map((inv) => {
+        if (inv.id === newIssue.entityId || inv.invoiceNumber === newIssue.referenceNumber) {
+          return { ...inv, hasIssue: true, issueId: newIssue.id, issueStatus: 'PENDING' as const };
+        }
+        return inv;
+      });
+      setInvoices(updatedInvoices);
+      saveInvoices(updatedInvoices);
+    }
+    showToast('success', `Issue flagged on ${newIssue.referenceNumber}. Viewable in Issue Resolution Hub.`);
+  };
+
+  const handleUpdateIssue = (updatedIssue: DocumentIssueRecord) => {
+    const updated = addOrUpdateIssue(updatedIssue);
+    setIssues(updated);
+    showToast('success', `Updated issue record on ${updatedIssue.referenceNumber}.`);
+  };
+
+  const handleResolveIssue = (issueId: string, resolvedBy: string, resolutionNotes: string) => {
+    const updated = resolveDocumentIssue(issueId, resolvedBy, resolutionNotes);
+    setIssues(updated);
+
+    const resolvedItem = updated.find((i) => i.id === issueId);
+    if (resolvedItem && resolvedItem.entityType === 'INVOICE') {
+      const updatedInvoices = invoices.map((inv) => {
+        if (inv.id === resolvedItem.entityId || inv.invoiceNumber === resolvedItem.referenceNumber) {
+          return { ...inv, hasIssue: false, issueStatus: 'RESOLVED' as const };
+        }
+        return inv;
+      });
+      setInvoices(updatedInvoices);
+      saveInvoices(updatedInvoices);
+    }
+    showToast('success', `Issue resolved and moved out of active issue invoices.`);
+  };
+
+  const handleImportInvoices = (importedInvoices: InvoiceRecord[], mode: 'append' | 'replace' | string = 'append') => {
+    let finalInvoices: InvoiceRecord[] = [];
+    const isReplace = String(mode).toLowerCase() === 'replace';
+    if (isReplace) {
+      finalInvoices = importedInvoices;
+    } else {
+      // Append mode: merge imported records with existing records
+      const map = new Map<string, InvoiceRecord>();
+      invoices.forEach((inv) => map.set(inv.invoiceNumber.toLowerCase().trim(), inv));
+      importedInvoices.forEach((inv) => map.set(inv.invoiceNumber.toLowerCase().trim(), inv));
+      finalInvoices = Array.from(map.values());
+    }
+
+    setInvoices(finalInvoices);
+    saveInvoices(finalInvoices);
+    triggerAutoSyncIfEnabled(poLines, finalInvoices, deliveryNotes, payments);
+    showToast('success', `Successfully loaded ${importedInvoices.length} invoices into database (${isReplace ? 'replace' : 'append'} mode). Total database: ${finalInvoices.length} invoices.`);
+  };
+
+  const handleDeleteIssue = (issueId: string) => {
+    const updated = issues.filter((i) => i.id !== issueId);
+    setIssues(updated);
+    saveIssues(updated);
+    showToast('info', 'Issue record deleted.');
+  };
+
+  const handleOpenFlagModal = (preselected?: {
+    type: 'INVOICE' | 'DELIVERY' | 'PAYMENT';
+    invoice?: InvoiceRecord;
+    deliveryNote?: DeliveryNoteRecord;
+    payment?: PaymentRecord;
+  }) => {
+    setPreselectedFlagEntity(preselected || null);
+    setIsFlagModalOpen(true);
+  };
+
+  // Admin: Handle adding new PO
+  const handleAddPO = (newLines: POLineItem[]) => {
+    const updated = [...newLines, ...poLines];
+    setPoLines(updated);
+    savePOs(updated);
+    triggerAutoSyncIfEnabled(updated, invoices, deliveryNotes, payments);
+    showToast('success', `Added Purchase Order with ${newLines.length} line(s).`);
+  };
+
+  // Admin: Handle editing PO header details across all lines
+  const handleEditPODetails = (
+    poNumber: string,
+    details: { customerName: string; destination: string; contract: string; date: string }
+  ) => {
+    const updated = poLines.map((l) => {
+      if (l.poNumber.trim().toLowerCase() === poNumber.trim().toLowerCase()) {
+        return {
+          ...l,
+          customerName: details.customerName || l.customerName,
+          destination: details.destination || l.destination,
+          contract: details.contract || l.contract,
+          date: details.date || l.date,
+        };
+      }
+      return l;
+    });
+    setPoLines(updated);
+    savePOs(updated);
+    triggerAutoSyncIfEnabled(updated, invoices, deliveryNotes, payments);
+    showToast('success', `Updated details for PO "${poNumber}".`);
+  };
+
+  // Admin: Handle adding a new line to an existing PO
+  const handleAddPOLine = (newLine: POLineItem) => {
+    const updated = [newLine, ...poLines];
+    setPoLines(updated);
+    savePOs(updated);
+    triggerAutoSyncIfEnabled(updated, invoices, deliveryNotes, payments);
+    showToast('success', `Added line item to PO "${newLine.poNumber}".`);
+  };
+
+  // Admin: Handle updating a single PO line item
+  const handleUpdatePOLine = (updatedLine: POLineItem) => {
+    const updated = poLines.map((l) => (l.id === updatedLine.id ? updatedLine : l));
+    setPoLines(updated);
+    savePOs(updated);
+    triggerAutoSyncIfEnabled(updated, invoices, deliveryNotes, payments);
+    showToast('success', `Updated line item "${updatedLine.itemDescription}".`);
+  };
+
+  // Admin: Handle deleting a single PO line item
+  const handleDeletePOLine = (lineId: string) => {
+    const updated = poLines.filter((l) => l.id !== lineId);
+    setPoLines(updated);
+    savePOs(updated);
+    triggerAutoSyncIfEnabled(updated, invoices, deliveryNotes, payments);
+    showToast('info', 'PO line item removed.');
   };
 
   // Handle deleting/voiding an Invoice
@@ -304,6 +505,7 @@ export default function App() {
         totalPOsCount={poGroups.length}
         totalInvoicesCount={invoices.length}
         totalDNsCount={deliveryNotes.length}
+        pendingIssuesCount={pendingIssuesCount}
         onOpenNewInvoice={() => {
           setSelectedPoForInvoice('');
           setActiveTab('create_invoice');
@@ -313,10 +515,44 @@ export default function App() {
         onOpenAutoReport={() => setIsAutoReportOpen(true)}
         sheetsConfig={sheetsConfig}
         currentUser={currentUser}
+        onOpenPinLogin={() => setIsPinLoginOpen(true)}
       />
 
       {/* Main Content Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-6">
+        {!canViewScreen(currentUser, activeTab) ? (
+          <div className="max-w-xl mx-auto my-12 bg-white rounded-2xl border border-slate-200 p-8 text-center shadow-sm space-y-4 animate-in fade-in">
+            <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto">
+              <ShieldAlert className="w-8 h-8 text-amber-600" />
+            </div>
+            <h2 className="text-xl font-bold text-slate-900">Access Restricted</h2>
+            <p className="text-sm text-slate-600 leading-relaxed">
+              Your account does not currently have permission to view the <strong className="text-slate-900">{activeTab.replace('_', ' ').toUpperCase()}</strong> module.
+            </p>
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700 text-left space-y-1">
+              <p><span className="font-semibold text-slate-900">User:</span> {currentUser.name}</p>
+              <p><span className="font-semibold text-slate-900">Role:</span> {currentUser.role} ({currentUser.department})</p>
+              <p><span className="font-semibold text-slate-900">Status:</span> {currentUser.status}</p>
+            </div>
+            <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setActiveTab('dashboard')}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Return to Dashboard
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsPinLoginOpen(true)}
+                className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Enter 4-Digit PIN / Switch Account
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
         {activeTab === 'dashboard' && (
           <Dashboard
             metrics={metrics}
@@ -349,37 +585,78 @@ export default function App() {
             }}
             onDownloadTemplate={generateSampleExcelTemplate}
             onOpenVoiceSearch={() => setIsVoiceSearchOpen(true)}
+            currentUser={currentUser}
+            onAddPO={handleAddPO}
+            onEditPODetails={handleEditPODetails}
+            onAddPOLine={handleAddPOLine}
+            onUpdatePOLine={handleUpdatePOLine}
+            onDeletePOLine={handleDeletePOLine}
           />
         )}
 
         {activeTab === 'create_invoice' && (
           <InvoiceCreator
+            allPoLines={enrichedLines}
             poLines={enrichedLines}
+            poGroups={poGroups}
             invoices={invoices}
             preselectedPoNumber={selectedPoForInvoice}
             onSaveInvoice={handleSaveInvoice}
             onViewInvoicesDatabase={() => setActiveTab('invoices_db')}
+            editingInvoice={editingInvoice}
+            onCancelEdit={() => setEditingInvoice(null)}
+            currentUser={currentUser}
           />
         )}
 
         {activeTab === 'invoices_db' && (
           <InvoiceHistory
             invoices={invoices}
-            deliveryNotes={deliveryNotes}
+            issues={issues}
             onDeleteInvoice={handleDeleteInvoice}
             onCreateNewInvoice={() => {
               setSelectedPoForInvoice('');
+              setEditingInvoice(null);
               setActiveTab('create_invoice');
             }}
             onPrintInvoice={(inv) => setPrintingInvoice(inv)}
+            onReloadInvoice={(inv) => {
+              setEditingInvoice(inv);
+              setActiveTab('create_invoice');
+            }}
+            onFlagIssue={(inv) => handleOpenFlagModal({ type: 'INVOICE', invoice: inv })}
+            onViewIssuesTab={() => setActiveTab('issue_tracking')}
+            onImportInvoices={handleImportInvoices}
+            currentUser={currentUser}
+          />
+        )}
+
+        {activeTab === 'issue_tracking' && (
+          <IssueResolutionHub
+            issues={issues}
+            invoices={invoices}
+            deliveryNotes={deliveryNotes}
+            payments={payments}
+            onUpdateIssue={handleUpdateIssue}
+            onResolveIssue={handleResolveIssue}
+            onDeleteIssue={handleDeleteIssue}
+            onReloadInvoice={(inv) => {
+              setEditingInvoice(inv);
+              setActiveTab('create_invoice');
+            }}
+            onOpenFlagModal={handleOpenFlagModal}
+            currentUser={currentUser}
           />
         )}
 
         {activeTab === 'delivery_notes' && (
           <DeliveryNotesManager
+            allPoLines={enrichedLines}
             poLines={enrichedLines}
+            poGroups={poGroups}
             deliveryNotes={deliveryNotes}
             onSaveDeliveryNote={handleSaveDeliveryNote}
+            currentUser={currentUser}
           />
         )}
 
@@ -419,6 +696,10 @@ export default function App() {
             onClearData={handleClearData}
             onDataRestored={handleDataRestored}
             onSheetsSynced={() => setSheetsConfig(loadSheetsConfig())}
+            onUserRoleSwitched={(u) => {
+              setCurrentUser(u);
+              showToast('success', `Session user switched to ${u.name} (${u.role})`);
+            }}
           />
         )}
 
@@ -432,6 +713,8 @@ export default function App() {
               setActiveTab('create_invoice');
             }}
           />
+        )}
+          </>
         )}
       </main>
 
@@ -485,6 +768,37 @@ export default function App() {
         payments={payments}
         metrics={metrics}
         currentUser={currentUser}
+      />
+
+      {/* Flag / Report Discrepancy Issue Modal */}
+      <FlagIssueModal
+        isOpen={isFlagModalOpen}
+        onClose={() => {
+          setIsFlagModalOpen(false);
+          setPreselectedFlagEntity(null);
+        }}
+        onSaveIssue={handleSaveIssue}
+        currentUser={currentUser}
+        initialEntity={preselectedFlagEntity}
+        invoices={invoices}
+        deliveryNotes={deliveryNotes}
+        payments={payments}
+      />
+
+      {/* 4-Digit PIN Authentication & User Switcher Modal */}
+      <PinLoginModal
+        isOpen={isPinLoginOpen}
+        onClose={() => {
+          setIsPinLoginOpen(false);
+          setPinLoginTargetUser(null);
+        }}
+        targetUser={pinLoginTargetUser}
+        onLoginSuccess={(user) => {
+          setCurrentUser(user);
+          setIsPinLoginOpen(false);
+          setPinLoginTargetUser(null);
+          showToast('success', `Signed in as ${user.name} (${user.role})`);
+        }}
       />
     </div>
   );

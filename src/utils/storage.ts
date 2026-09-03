@@ -7,21 +7,77 @@ import {
   MatchingItem, 
   DashboardMetrics,
   SeriesSettings,
-  AppUser
+  CustomerSeriesBook,
+  AppUser,
+  DocumentIssueRecord,
+  ScreenId,
+  ScreenAccessLevel,
+  ScreenPermissions
 } from '../types';
 import { 
   INITIAL_PO_DATA, 
   INITIAL_INVOICES, 
   INITIAL_DELIVERY_NOTES, 
-  INITIAL_PAYMENTS 
+  INITIAL_PAYMENTS,
+  INITIAL_DOCUMENT_ISSUES
 } from './sampleData';
 
 const PO_STORAGE_KEY = 'po_tracker_master_po_v1';
 const INVOICE_STORAGE_KEY = 'po_tracker_invoices_v1';
 const DN_STORAGE_KEY = 'po_tracker_delivery_notes_v1';
 const PAYMENT_STORAGE_KEY = 'po_tracker_payments_v1';
+const ISSUES_STORAGE_KEY = 'po_tracker_document_issues_v1';
 const SERIES_STORAGE_KEY = 'po_tracker_series_config_v1';
+const CUSTOMER_SERIES_STORAGE_KEY = 'po_tracker_customer_series_books_v1';
 const USERS_STORAGE_KEY = 'po_tracker_users_v1';
+
+export const DEFAULT_CUSTOMER_BOOKS: CustomerSeriesBook[] = [
+  {
+    id: 'book-cru',
+    customerName: 'CRU Mining Ltd',
+    invoicePrefix: 'CRU',
+    invoiceStartNumber: 1,
+    invoiceEndNumber: 200,
+    invoiceCurrentNumber: 1,
+    deliveryPrefix: 'CRU',
+    deliveryStartNumber: 1,
+    deliveryEndNumber: 200,
+    deliveryCurrentNumber: 1,
+    padding: 3,
+    description: 'Series book CRU001 - CRU200 for CRU Mining Ltd',
+    updatedAt: '2026-03-01',
+  },
+  {
+    id: 'book-grb',
+    customerName: 'GRB Logistics',
+    invoicePrefix: 'GRB',
+    invoiceStartNumber: 1,
+    invoiceEndNumber: 100,
+    invoiceCurrentNumber: 1,
+    deliveryPrefix: 'GRB',
+    deliveryStartNumber: 1,
+    deliveryEndNumber: 100,
+    deliveryCurrentNumber: 1,
+    padding: 3,
+    description: 'Series book GRB001 - GRB100 for GRB Logistics',
+    updatedAt: '2026-03-01',
+  },
+  {
+    id: 'book-acacia',
+    customerName: 'Acacia Mining PLC',
+    invoicePrefix: 'ACA',
+    invoiceStartNumber: 1,
+    invoiceEndNumber: 200,
+    invoiceCurrentNumber: 1,
+    deliveryPrefix: 'ACA',
+    deliveryStartNumber: 1,
+    deliveryEndNumber: 200,
+    deliveryCurrentNumber: 1,
+    padding: 3,
+    description: 'Series book ACA001 - ACA200 for Acacia Mining PLC',
+    updatedAt: '2026-03-01',
+  }
+];
 
 export const DEFAULT_SERIES_CONFIG: SeriesSettings = {
   invoiceSeries: {
@@ -42,6 +98,95 @@ export const DEFAULT_SERIES_CONFIG: SeriesSettings = {
   },
 };
 
+export const generateFourDigitPin = (): string => {
+  return Math.floor(1000 + Math.random() * 9000).toString();
+};
+
+export const getDefaultScreenPermissionsForRole = (role: AppUser['role']): ScreenPermissions => {
+  if (role === 'Admin') {
+    return {
+      dashboard: 'edit',
+      po_master: 'edit',
+      create_invoice: 'edit',
+      invoices_db: 'edit',
+      issue_tracking: 'edit',
+      delivery_notes: 'edit',
+      matching_report: 'edit',
+      payments: 'edit',
+      ledger: 'edit',
+      settings: 'edit',
+    };
+  }
+
+  if (role === 'Finance Officer') {
+    return {
+      dashboard: 'edit',
+      po_master: 'view',
+      create_invoice: 'edit',
+      invoices_db: 'edit',
+      issue_tracking: 'edit',
+      delivery_notes: 'view',
+      matching_report: 'view',
+      payments: 'edit',
+      ledger: 'view',
+      settings: 'none',
+    };
+  }
+
+  if (role === 'Logistics Manager') {
+    return {
+      dashboard: 'view',
+      po_master: 'view',
+      create_invoice: 'view',
+      invoices_db: 'view',
+      issue_tracking: 'edit',
+      delivery_notes: 'edit',
+      matching_report: 'view',
+      payments: 'none',
+      ledger: 'view',
+      settings: 'none',
+    };
+  }
+
+  if (role === 'Billing Clerk') {
+    return {
+      dashboard: 'view',
+      po_master: 'view',
+      create_invoice: 'edit',
+      invoices_db: 'view',
+      issue_tracking: 'view',
+      delivery_notes: 'none',
+      matching_report: 'none',
+      payments: 'none',
+      ledger: 'view',
+      settings: 'none',
+    };
+  }
+
+  // Auditor / default
+  return {
+    dashboard: 'view',
+    po_master: 'view',
+    create_invoice: 'view',
+    invoices_db: 'view',
+    issue_tracking: 'view',
+    delivery_notes: 'view',
+    matching_report: 'view',
+    payments: 'view',
+    ledger: 'view',
+    settings: 'none',
+  };
+};
+
+export const getUserScreenPermission = (user?: AppUser | null, screenId?: ScreenId): ScreenAccessLevel => {
+  if (!user || !screenId) return 'none';
+  if (user.role === 'Admin') return 'edit';
+  if (user.screenPermissions && user.screenPermissions[screenId]) {
+    return user.screenPermissions[screenId]!;
+  }
+  return getDefaultScreenPermissionsForRole(user.role)[screenId] || 'none';
+};
+
 export const DEFAULT_USERS: AppUser[] = [
   {
     id: 'usr-1',
@@ -51,6 +196,8 @@ export const DEFAULT_USERS: AppUser[] = [
     department: 'Executive Management',
     status: 'Active',
     createdAt: '2026-01-15',
+    pinCode: '1234',
+    screenPermissions: getDefaultScreenPermissionsForRole('Admin'),
   },
   {
     id: 'usr-2',
@@ -60,6 +207,8 @@ export const DEFAULT_USERS: AppUser[] = [
     department: 'Finance & Accounting',
     status: 'Active',
     createdAt: '2026-02-01',
+    pinCode: '2468',
+    screenPermissions: getDefaultScreenPermissionsForRole('Finance Officer'),
   },
   {
     id: 'usr-3',
@@ -69,6 +218,8 @@ export const DEFAULT_USERS: AppUser[] = [
     department: 'Supply Chain & Logistics',
     status: 'Active',
     createdAt: '2026-02-10',
+    pinCode: '1357',
+    screenPermissions: getDefaultScreenPermissionsForRole('Logistics Manager'),
   },
   {
     id: 'usr-4',
@@ -78,6 +229,8 @@ export const DEFAULT_USERS: AppUser[] = [
     department: 'Invoicing & Operations',
     status: 'Active',
     createdAt: '2026-02-18',
+    pinCode: '5555',
+    screenPermissions: getDefaultScreenPermissionsForRole('Billing Clerk'),
   },
 ];
 
@@ -127,13 +280,140 @@ export const advanceSeriesNumber = (type: 'invoice' | 'delivery'): string => {
   return formatted;
 };
 
+export const loadStoredCustomerSeriesBooks = (): CustomerSeriesBook[] => {
+  try {
+    const raw = localStorage.getItem(CUSTOMER_SERIES_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load Customer Series Books', e);
+  }
+  saveStoredCustomerSeriesBooks(DEFAULT_CUSTOMER_BOOKS);
+  return DEFAULT_CUSTOMER_BOOKS;
+};
+
+export const saveStoredCustomerSeriesBooks = (books: CustomerSeriesBook[]) => {
+  try {
+    localStorage.setItem(CUSTOMER_SERIES_STORAGE_KEY, JSON.stringify(books));
+  } catch (e) {
+    console.error('Failed to save Customer Series Books', e);
+  }
+};
+
+export const getCustomerSeriesBook = (customerName: string): CustomerSeriesBook => {
+  const books = loadStoredCustomerSeriesBooks();
+  const trimmed = (customerName || '').trim();
+  const matched = books.find(
+    (b) => b.customerName.toLowerCase() === trimmed.toLowerCase()
+  );
+  if (matched) return matched;
+
+  // Auto-generate a series book if customer is not yet configured
+  const cleaned = trimmed.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  const prefix = cleaned.length >= 3 ? cleaned.slice(0, 3) : (cleaned || 'CUS').padEnd(3, 'X');
+  
+  const newBook: CustomerSeriesBook = {
+    id: `book-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+    customerName: trimmed || 'General Customer',
+    invoicePrefix: prefix,
+    invoiceStartNumber: 1,
+    invoiceEndNumber: 200,
+    invoiceCurrentNumber: 1,
+    deliveryPrefix: prefix,
+    deliveryStartNumber: 1,
+    deliveryEndNumber: 200,
+    deliveryCurrentNumber: 1,
+    padding: 3,
+    description: `Series book ${prefix}001 - ${prefix}200 for ${trimmed || 'General Customer'}`,
+    updatedAt: new Date().toISOString().split('T')[0],
+  };
+
+  const updatedBooks = [...books, newBook];
+  saveStoredCustomerSeriesBooks(updatedBooks);
+  return newBook;
+};
+
+export const saveOrUpdateCustomerSeriesBook = (book: CustomerSeriesBook) => {
+  const books = loadStoredCustomerSeriesBooks();
+  const index = books.findIndex(
+    (b) => b.id === book.id || b.customerName.toLowerCase() === book.customerName.toLowerCase()
+  );
+  let updated: CustomerSeriesBook[];
+  if (index >= 0) {
+    updated = [...books];
+    updated[index] = { ...book, updatedAt: new Date().toISOString().split('T')[0] };
+  } else {
+    updated = [...books, { ...book, updatedAt: new Date().toISOString().split('T')[0] }];
+  }
+  saveStoredCustomerSeriesBooks(updated);
+};
+
+export const peekCustomerSeriesNumber = (customerName: string, type: 'invoice' | 'delivery'): string => {
+  if (!customerName || customerName === 'ALL') {
+    const config = loadStoredSeriesConfig();
+    const series = type === 'invoice' ? config.invoiceSeries : config.deliverySeries;
+    return formatSeriesNumber(series.prefix, series.currentNumber, series.padding);
+  }
+  const book = getCustomerSeriesBook(customerName);
+  if (type === 'invoice') {
+    return formatSeriesNumber(book.invoicePrefix, book.invoiceCurrentNumber, book.padding);
+  } else {
+    return formatSeriesNumber(book.deliveryPrefix, book.deliveryCurrentNumber, book.padding);
+  }
+};
+
+export const advanceCustomerSeriesNumber = (customerName: string, type: 'invoice' | 'delivery'): string => {
+  if (!customerName || customerName === 'ALL') {
+    return advanceSeriesNumber(type);
+  }
+  const book = getCustomerSeriesBook(customerName);
+  let formatted = '';
+  if (type === 'invoice') {
+    formatted = formatSeriesNumber(book.invoicePrefix, book.invoiceCurrentNumber, book.padding);
+    if (book.invoiceCurrentNumber < book.invoiceEndNumber) {
+      book.invoiceCurrentNumber += 1;
+    } else {
+      book.invoiceCurrentNumber = book.invoiceStartNumber;
+    }
+  } else {
+    formatted = formatSeriesNumber(book.deliveryPrefix, book.deliveryCurrentNumber, book.padding);
+    if (book.deliveryCurrentNumber < book.deliveryEndNumber) {
+      book.deliveryCurrentNumber += 1;
+    } else {
+      book.deliveryCurrentNumber = book.deliveryStartNumber;
+    }
+  }
+  saveOrUpdateCustomerSeriesBook(book);
+  return formatted;
+};
+
 export const loadStoredUsers = (): AppUser[] => {
   try {
     const raw = localStorage.getItem(USERS_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        let changed = false;
+        const normalized = parsed.map((u: any, idx: number) => {
+          const defaultPin = idx === 0 ? '1234' : (u.pinCode || generateFourDigitPin());
+          const permissions = u.screenPermissions || getDefaultScreenPermissionsForRole(u.role);
+          const status = u.status === 'On Hold' ? 'On Hold' : (u.status === 'Inactive' ? 'Inactive' : 'Active');
+          if (!u.pinCode || !u.screenPermissions) changed = true;
+          return {
+            ...u,
+            status,
+            pinCode: defaultPin,
+            screenPermissions: permissions,
+          };
+        });
+        if (changed) {
+          saveStoredUsers(normalized);
+        }
+        return normalized;
       }
     }
   } catch (e) {
@@ -248,16 +528,90 @@ export const savePayments = (payments: PaymentRecord[]) => {
   }
 };
 
+export const loadStoredIssues = (): DocumentIssueRecord[] => {
+  try {
+    const raw = localStorage.getItem(ISSUES_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load Issues from storage', e);
+  }
+  saveIssues(INITIAL_DOCUMENT_ISSUES);
+  return INITIAL_DOCUMENT_ISSUES;
+};
+
+export const saveIssues = (issues: DocumentIssueRecord[]) => {
+  try {
+    localStorage.setItem(ISSUES_STORAGE_KEY, JSON.stringify(issues));
+  } catch (e) {
+    console.error('Failed to save Issues to storage', e);
+  }
+};
+
+export const addOrUpdateIssue = (issue: DocumentIssueRecord): DocumentIssueRecord[] => {
+  const current = loadStoredIssues();
+  const index = current.findIndex((i) => i.id === issue.id);
+  let updated: DocumentIssueRecord[];
+  if (index >= 0) {
+    updated = [...current];
+    updated[index] = issue;
+  } else {
+    updated = [issue, ...current];
+  }
+  saveIssues(updated);
+  return updated;
+};
+
+export const resolveDocumentIssue = (
+  issueId: string,
+  resolvedBy: string,
+  resolutionNotes: string
+): DocumentIssueRecord[] => {
+  const current = loadStoredIssues();
+  const updated = current.map((item) => {
+    if (item.id === issueId) {
+      return {
+        ...item,
+        status: 'RESOLVED' as const,
+        resolvedBy,
+        resolvedAt: new Date().toISOString(),
+        resolutionNotes,
+        lineIssues: item.lineIssues.map((l) => ({ ...l, status: 'RESOLVED' as const })),
+        comments: [
+          ...item.comments,
+          {
+            id: `comm-res-${Date.now()}`,
+            authorName: resolvedBy,
+            authorRole: 'Reviewer / Admin',
+            comment: `Issue marked as resolved: ${resolutionNotes}`,
+            createdAt: new Date().toISOString(),
+            type: 'RESOLUTION_NOTE' as const,
+          }
+        ]
+      };
+    }
+    return item;
+  });
+  saveIssues(updated);
+  return updated;
+};
+
 export const resetToSampleData = () => {
   savePOs(INITIAL_PO_DATA);
   saveInvoices(INITIAL_INVOICES);
   saveDeliveryNotes(INITIAL_DELIVERY_NOTES);
   savePayments(INITIAL_PAYMENTS);
+  saveIssues(INITIAL_DOCUMENT_ISSUES);
   return { 
     pos: INITIAL_PO_DATA, 
     invoices: INITIAL_INVOICES,
     deliveryNotes: INITIAL_DELIVERY_NOTES,
     payments: INITIAL_PAYMENTS,
+    issues: INITIAL_DOCUMENT_ISSUES,
   };
 };
 
@@ -266,21 +620,24 @@ export const clearAllData = () => {
   saveInvoices([]);
   saveDeliveryNotes([]);
   savePayments([]);
-  return { pos: [], invoices: [], deliveryNotes: [], payments: [] };
+  saveIssues([]);
+  return { pos: [], invoices: [], deliveryNotes: [], payments: [], issues: [] };
 };
 
 // Reconcile and calculate line tracking against all recorded invoices and delivery notes
 export const enrichPOLinesWithTracking = (
-  rawLines: POLineItem[],
-  invoices: InvoiceRecord[],
+  rawLines: POLineItem[] = [],
+  invoices: InvoiceRecord[] = [],
   deliveryNotes: DeliveryNoteRecord[] = []
 ): POLineItem[] => {
   // Map of total invoiced qty by poLineId or (poNumber + itemDescription)
   const invoicedQtyByLineId = new Map<string, number>();
   const invoicedQtyByDesc = new Map<string, number>();
 
-  invoices.forEach((inv) => {
-    inv.lines.forEach((line) => {
+  (invoices || []).forEach((inv) => {
+    if (!inv) return;
+    (inv.lines || []).forEach((line) => {
+      if (!line) return;
       const currentIdQty = invoicedQtyByLineId.get(line.poLineId) || 0;
       invoicedQtyByLineId.set(line.poLineId, currentIdQty + (line.invoicedQuantity || 0));
 
@@ -294,8 +651,10 @@ export const enrichPOLinesWithTracking = (
   const deliveredQtyByLineId = new Map<string, number>();
   const deliveredQtyByDesc = new Map<string, number>();
 
-  deliveryNotes.forEach((dn) => {
-    dn.lines.forEach((line) => {
+  (deliveryNotes || []).forEach((dn) => {
+    if (!dn) return;
+    (dn.lines || []).forEach((line) => {
+      if (!line) return;
       const currentIdQty = deliveredQtyByLineId.get(line.poLineId) || 0;
       deliveredQtyByLineId.set(line.poLineId, currentIdQty + (line.deliveredQuantity || 0));
 
@@ -305,7 +664,7 @@ export const enrichPOLinesWithTracking = (
     });
   });
 
-  return rawLines.map((line) => {
+  return (rawLines || []).map((line) => {
     let invoicedQuantity = invoicedQtyByLineId.get(line.id);
     if (invoicedQuantity === undefined) {
       const descKey = `${line.poNumber}___${line.itemDescription}`;
@@ -341,14 +700,15 @@ export const enrichPOLinesWithTracking = (
 
 // Group PO lines into structured PO Groups
 export const groupPOsByNumber = (
-  lines: POLineItem[],
-  invoices: InvoiceRecord[],
+  lines: POLineItem[] = [],
+  invoices: InvoiceRecord[] = [],
   deliveryNotes: DeliveryNoteRecord[] = []
 ): PurchaseOrderGroup[] => {
   const enrichedLines = enrichPOLinesWithTracking(lines, invoices, deliveryNotes);
   const groupsMap = new Map<string, PurchaseOrderGroup>();
 
-  enrichedLines.forEach((line) => {
+  (enrichedLines || []).forEach((line) => {
+    if (!line || !line.poNumber) return;
     const key = line.poNumber.trim();
     if (!groupsMap.has(key)) {
       groupsMap.set(key, {
@@ -416,19 +776,19 @@ export const groupPOsByNumber = (
 
 // Comprehensive PO Items vs Delivery (Received) vs Invoiced matching generator
 export const generateMatchingReport = (
-  rawLines: POLineItem[],
-  deliveryNotes: DeliveryNoteRecord[],
-  invoices: InvoiceRecord[]
+  rawLines: POLineItem[] = [],
+  deliveryNotes: DeliveryNoteRecord[] = [],
+  invoices: InvoiceRecord[] = []
 ): MatchingItem[] => {
   const enriched = enrichPOLinesWithTracking(rawLines, invoices, deliveryNotes);
 
-  return enriched.map((line) => {
-    const poQty = line.quantity;
+  return (enriched || []).map((line) => {
+    const poQty = line.quantity || 0;
     const invQty = line.invoicedQuantity || 0;
     const delQty = line.deliveredQuantity || 0;
 
-    const unitPriceWithVat = poQty > 0 ? line.valueAfterVat / poQty : line.unitPrice * (1 + line.vatRate);
-    const poTotalVal = line.valueAfterVat;
+    const unitPriceWithVat = poQty > 0 ? (line.valueAfterVat || 0) / poQty : (line.unitPrice || 0) * (1 + (line.vatRate || 0.18));
+    const poTotalVal = line.valueAfterVat || 0;
     const invoicedVal = Math.round(invQty * unitPriceWithVat * 100) / 100;
     const deliveredVal = Math.round(delQty * unitPriceWithVat * 100) / 100;
 
@@ -444,12 +804,12 @@ export const generateMatchingReport = (
     }
 
     // Find linked DNs and Invoices
-    const deliveryNoteNumbers = deliveryNotes
-      .filter((dn) => dn.poNumber === line.poNumber && dn.lines.some((l) => l.poLineId === line.id || l.itemDescription === line.itemDescription))
+    const deliveryNoteNumbers = (deliveryNotes || [])
+      .filter((dn) => dn && dn.poNumber === line.poNumber && (dn.lines || []).some((l) => l && (l.poLineId === line.id || l.itemDescription === line.itemDescription)))
       .map((dn) => dn.deliveryNoteNumber);
 
-    const invoiceNumbers = invoices
-      .filter((inv) => inv.poNumber === line.poNumber && inv.lines.some((l) => l.poLineId === line.id || l.itemDescription === line.itemDescription))
+    const invoiceNumbers = (invoices || [])
+      .filter((inv) => inv && inv.poNumber === line.poNumber && (inv.lines || []).some((l) => l && (l.poLineId === line.id || l.itemDescription === line.itemDescription)))
       .map((inv) => inv.invoiceNumber);
 
     return {
@@ -479,12 +839,12 @@ export const generateMatchingReport = (
 };
 
 export const calculateDashboardMetrics = (
-  poGroups: PurchaseOrderGroup[],
-  invoices: InvoiceRecord[],
+  poGroups: PurchaseOrderGroup[] = [],
+  invoices: InvoiceRecord[] = [],
   deliveryNotes: DeliveryNoteRecord[] = [],
   payments: PaymentRecord[] = []
 ): DashboardMetrics => {
-  const totalPOs = poGroups.length;
+  const totalPOs = (poGroups || []).length;
   let totalPoValue = 0;
   let totalInvoicedValue = 0;
   let fullyInvoicedPOs = 0;
@@ -493,14 +853,16 @@ export const calculateDashboardMetrics = (
   let totalUndeliveredItemsCount = 0;
   let totalUnmatchedItemsCount = 0;
 
-  poGroups.forEach((grp) => {
-    totalPoValue += grp.totalValueAfterVat;
-    totalInvoicedValue += grp.invoicedValueAfterVat;
+  (poGroups || []).forEach((grp) => {
+    if (!grp) return;
+    totalPoValue += grp.totalValueAfterVat || 0;
+    totalInvoicedValue += grp.invoicedValueAfterVat || 0;
     if (grp.status === 'FULLY_INVOICED') fullyInvoicedPOs++;
     else if (grp.status === 'PARTIALLY_INVOICED') partiallyInvoicedPOs++;
     else pendingPOs++;
 
-    grp.lines.forEach((line) => {
+    (grp.lines || []).forEach((line) => {
+      if (!line) return;
       if ((line.undeliveredQuantity || line.quantity) > 0) {
         totalUndeliveredItemsCount++;
       }
@@ -512,14 +874,18 @@ export const calculateDashboardMetrics = (
 
   // Delivery Notes metrics
   let totalDeliveredValue = 0;
-  deliveryNotes.forEach((dn) => {
-    totalDeliveredValue += dn.totalDeliveredValue;
+  (deliveryNotes || []).forEach((dn) => {
+    if (dn) {
+      totalDeliveredValue += dn.totalDeliveredValue || 0;
+    }
   });
 
   // Payments metrics
   let totalPaymentsReceived = 0;
-  payments.forEach((p) => {
-    totalPaymentsReceived += p.amountPaid;
+  (payments || []).forEach((p) => {
+    if (p) {
+      totalPaymentsReceived += p.amountPaid || 0;
+    }
   });
 
   totalPoValue = Math.round(totalPoValue * 100) / 100;
@@ -536,8 +902,8 @@ export const calculateDashboardMetrics = (
     totalPoValue,
     totalInvoicedValue,
     totalRemainingValue,
-    totalInvoicesCount: invoices.length,
-    totalDeliveryNotesCount: deliveryNotes.length,
+    totalInvoicesCount: (invoices || []).length,
+    totalDeliveryNotesCount: (deliveryNotes || []).length,
     totalDeliveredValue,
     totalPaymentsReceived,
     totalOutstandingPayments,
@@ -550,10 +916,16 @@ export const calculateDashboardMetrics = (
   };
 };
 
+export const CURRENCY_CODE = 'TZS';
+
 export const formatCurrency = (amount: number): string => {
   return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount || 0);
+};
+
+export const formatMoney = (amount: number): string => {
+  return `TZS ${formatCurrency(amount)}`;
 };
 

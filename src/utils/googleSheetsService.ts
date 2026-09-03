@@ -286,7 +286,7 @@ export const syncAllDataToGoogleSheets = async (
     'Notes',
     'Recorded Timestamp',
   ];
-  const invRows = data.invoices.map((inv) => [
+  const invRows = (data.invoices || []).map((inv) => [
     inv.id,
     inv.invoiceNumber,
     inv.invoiceDate,
@@ -316,8 +316,10 @@ export const syncAllDataToGoogleSheets = async (
     'Value After VAT',
   ];
   const invItemRows: any[] = [];
-  data.invoices.forEach((inv) => {
-    inv.lines.forEach((line) => {
+  (data.invoices || []).forEach((inv) => {
+    if (!inv) return;
+    (inv.lines || []).forEach((line) => {
+      if (!line) return;
       invItemRows.push([
         inv.invoiceNumber,
         line.poLineId,
@@ -350,7 +352,7 @@ export const syncAllDataToGoogleSheets = async (
     'Notes',
     'Created Timestamp',
   ];
-  const dnRows = data.deliveryNotes.map((dn) => [
+  const dnRows = (data.deliveryNotes || []).map((dn) => [
     dn.id,
     dn.deliveryNoteNumber,
     dn.deliveryDate,
@@ -378,8 +380,10 @@ export const syncAllDataToGoogleSheets = async (
     'Value After VAT',
   ];
   const dnItemRows: any[] = [];
-  data.deliveryNotes.forEach((dn) => {
-    dn.lines.forEach((line) => {
+  (data.deliveryNotes || []).forEach((dn) => {
+    if (!dn) return;
+    (dn.lines || []).forEach((line) => {
+      if (!line) return;
       dnItemRows.push([
         dn.deliveryNoteNumber,
         line.poLineId,
@@ -406,7 +410,7 @@ export const syncAllDataToGoogleSheets = async (
     'Notes',
     'Recorded Timestamp',
   ];
-  const payRows = data.payments.map((p) => [
+  const payRows = (data.payments || []).map((p) => [
     p.id,
     p.paymentNumber,
     p.paymentDate,
@@ -432,8 +436,10 @@ export const syncAllDataToGoogleSheets = async (
     'Allocated Amount',
   ];
   const allocRows: any[] = [];
-  data.payments.forEach((p) => {
+  (data.payments || []).forEach((p) => {
+    if (!p) return;
     (p.allocations || []).forEach((al) => {
+      if (!al) return;
       allocRows.push([
         p.paymentNumber,
         al.invoiceNumber,
@@ -449,7 +455,7 @@ export const syncAllDataToGoogleSheets = async (
 
   // 8. Prepare Users_Access data
   const userHeaders = ['User ID', 'Name', 'Email', 'Role', 'Department', 'Status', 'Created Date'];
-  const userRows = data.users.map((u) => [
+  const userRows = (data.users || []).map((u) => [
     u.id,
     u.name,
     u.email,

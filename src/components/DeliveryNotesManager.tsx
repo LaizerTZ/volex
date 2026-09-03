@@ -3,13 +3,21 @@ import {
   PurchaseOrderGroup, 
   DeliveryNoteRecord, 
   DeliveryNoteLineItem, 
-  POLineItem 
+  POLineItem,
+  CustomerSeriesBook,
+  AppUser
 } from '../types';
 import { 
   formatCurrency, 
   loadStoredSeriesConfig, 
   advanceSeriesNumber, 
-  formatSeriesNumber 
+  formatSeriesNumber,
+  loadStoredCustomerSeriesBooks,
+  saveOrUpdateCustomerSeriesBook,
+  getCustomerSeriesBook,
+  peekCustomerSeriesNumber,
+  advanceCustomerSeriesNumber,
+  groupPOsByNumber
 } from '../utils/storage';
 import * as XLSX from 'xlsx';
 import { 
@@ -35,28 +43,47 @@ import {
   ChevronRight,
   Download,
   Eye,
-  Trash2
+  Trash2,
+  BookOpen,
+  Ban,
+  MessageSquare,
+  X
 } from 'lucide-react';
 import { DeliveryNotePrintModal } from './DeliveryNotePrintModal';
 
 interface DeliveryNotesManagerProps {
-  deliveryNotes: DeliveryNoteRecord[];
-  poGroups: PurchaseOrderGroup[];
-  allPoLines: POLineItem[];
+  deliveryNotes?: DeliveryNoteRecord[];
+  poGroups?: PurchaseOrderGroup[];
+  allPoLines?: POLineItem[];
+  poLines?: POLineItem[]; // alias fallback
   onSaveDeliveryNote: (dn: DeliveryNoteRecord) => void;
-  onNavigateToMatching: () => void;
+  onNavigateToMatching?: () => void;
   onSeriesConfigChanged?: () => void;
+  currentUser?: AppUser;
 }
 
 export const DeliveryNotesManager: React.FC<DeliveryNotesManagerProps> = ({
-  deliveryNotes,
-  poGroups,
-  allPoLines,
+  deliveryNotes = [],
+  poGroups: passedPoGroups = [],
+  allPoLines = [],
+  poLines = [],
   onSaveDeliveryNote,
-  onNavigateToMatching,
+  onNavigateToMatching = () => {},
   onSeriesConfigChanged,
+  currentUser,
 }) => {
   const [viewMode, setViewMode] = useState<'create' | 'database'>('create');
+
+  const effectiveLines = allPoLines.length > 0 ? allPoLines : poLines;
+
+  // Fallback if poGroups was not supplied directly
+  const poGroups = useMemo(() => {
+    if (passedPoGroups && passedPoGroups.length > 0) return passedPoGroups;
+    if (effectiveLines.length > 0) {
+      return groupPOsByNumber(effectiveLines, [], deliveryNotes);
+    }
+    return [];
+  }, [passedPoGroups, effectiveLines, deliveryNotes]);
 
   // Vendor filter
   const [selectedVendor, setSelectedVendor] = useState<string>('ALL');
@@ -75,12 +102,28 @@ export const DeliveryNotesManager: React.FC<DeliveryNotesManagerProps> = ({
   const [driverName, setDriverName] = useState<string>('Hassan Rashid');
   const [receivedBy, setReceivedBy] = useState<string>('Site Receiving Officer');
   const [notes, setNotes] = useState<string>('');
+  const [headerComment, setHeaderComment] = useState<string>('Okay');
   const [vatRate] = useState<number>(0.18);
+
+  // Customer series book state & modal
+  const [activeCustomerBook, setActiveCustomerBook] = useState<CustomerSeriesBook | null>(null);
+  const [isBookModalOpen, setIsBookModalOpen] = useState<boolean>(false);
+  const [bookPrefix, setBookPrefix] = useState<string>('CRU');
+  const [bookStartNum, setBookStartNum] = useState<number>(1);
+  const [bookEndNum, setBookEndNum] = useState<number>(200);
+  const [bookCurrentNum, setBookCurrentNum] = useState<number>(1);
+  const [bookPadding, setBookPadding] = useState<number>(3);
+
+  // Cancel delivery note modal
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState<boolean>(false);
+  const [cancelReason, setCancelReason] = useState<string>('No PO reference');
+  const [customCancelNote, setCustomCancelNote] = useState<string>('');
 
   // Line items state
   const [deliveryLines, setDeliveryLines] = useState<DeliveryNoteLineItem[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successSavedDN, setSuccessSavedDN] = useState<DeliveryNoteRecord | null>(null);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
   // Print modal state
   const [printingDN, setPrintingDN] = useState<DeliveryNoteRecord | null>(null);
@@ -89,21 +132,15 @@ export const DeliveryNotesManager: React.FC<DeliveryNotesManagerProps> = ({
   const [dbSearchTerm, setDbSearchTerm] = useState('');
   const [dbVendorFilter, setDbVendorFilter] = useState('ALL');
 
-  // Auto-generate next delivery note number from series
-  const getNextDNFromSeries = () => {
-    const config = loadStoredSeriesConfig();
-    return formatSeriesNumber(
-      config.deliverySeries.prefix,
-      config.deliverySeries.currentNumber,
-      config.deliverySeries.padding
-    );
-  };
-
-  // Unique vendors list
+  // Unique vendors / customers list from POs and stored customer books
   const vendors = useMemo(() => {
     const set = new Set<string>();
     poGroups.forEach((g) => {
       if (g.customerName) set.add(g.customerName);
+    });
+    const storedBooks = loadStoredCustomerSeriesBooks();
+    storedBooks.forEach((b) => {
+      if (b.customerName) set.add(b.customerName);
     });
     return Array.from(set).sort();
   }, [poGroups]);
@@ -139,10 +176,43 @@ export const DeliveryNotesManager: React.FC<DeliveryNotesManagerProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Initialize DN number on mount
+  // Update customer book whenever customer changes
+  const syncCustomerBook = (customerName: string) => {
+    if (!customerName || customerName === 'ALL') {
+      const general = loadStoredSeriesConfig();
+      setActiveCustomerBook(null);
+      setDnNumber(
+        formatSeriesNumber(
+          general.deliverySeries.prefix,
+          general.deliverySeries.currentNumber,
+          general.deliverySeries.padding
+        )
+      );
+      return;
+    }
+
+    const book = getCustomerSeriesBook(customerName);
+    setActiveCustomerBook(book);
+    setBookPrefix(book.deliveryPrefix || book.invoicePrefix);
+    setBookStartNum(book.deliveryStartNumber || 1);
+    setBookEndNum(book.deliveryEndNumber || 200);
+    setBookCurrentNum(book.deliveryCurrentNumber || 1);
+    setBookPadding(book.padding || 3);
+
+    const nextNum = peekCustomerSeriesNumber(customerName, 'delivery');
+    setDnNumber(nextNum);
+  };
+
+  // Initialize on mount
   useEffect(() => {
     if (!dnNumber) {
-      setDnNumber(getNextDNFromSeries());
+      const initialCust = selectedVendor !== 'ALL' ? selectedVendor : (poGroups[0]?.customerName || '');
+      if (initialCust) {
+        syncCustomerBook(initialCust);
+      } else {
+        const config = loadStoredSeriesConfig();
+        setDnNumber(formatSeriesNumber(config.deliverySeries.prefix, config.deliverySeries.currentNumber, config.deliverySeries.padding));
+      }
     }
   }, []);
 
@@ -179,8 +249,9 @@ export const DeliveryNotesManager: React.FC<DeliveryNotesManagerProps> = ({
 
     setSelectedPoGroup(targetGroup);
     setPoSearchInput(targetGroup.poNumber);
-    if (selectedVendor !== 'ALL' && targetGroup.customerName !== selectedVendor) {
+    if (targetGroup.customerName) {
       setSelectedVendor(targetGroup.customerName);
+      syncCustomerBook(targetGroup.customerName);
     }
 
     // Initialize delivery lines from PO lines with delivery tracking
@@ -217,6 +288,7 @@ export const DeliveryNotesManager: React.FC<DeliveryNotesManagerProps> = ({
   // Handler when vendor changes in top dropdown
   const handleVendorChange = (vendor: string) => {
     setSelectedVendor(vendor);
+    syncCustomerBook(vendor);
     if (vendor === 'ALL') return;
 
     const vendorPOs = poGroups.filter((po) => po.customerName === vendor);
@@ -226,6 +298,38 @@ export const DeliveryNotesManager: React.FC<DeliveryNotesManagerProps> = ({
         handleSelectPO(firstActive.poNumber);
       }
     }
+  };
+
+  // Advance to next DN series number manually
+  const handleAdvanceToNextDNNumber = () => {
+    const cust = selectedPoGroup?.customerName || (selectedVendor !== 'ALL' ? selectedVendor : '');
+    const nextFormatted = advanceCustomerSeriesNumber(cust, 'delivery');
+    setDnNumber(nextFormatted);
+    if (cust) {
+      const updatedBook = getCustomerSeriesBook(cust);
+      setActiveCustomerBook(updatedBook);
+    }
+    if (onSeriesConfigChanged) onSeriesConfigChanged();
+  };
+
+  // Save changes to Customer Delivery Book Settings
+  const handleSaveCustomerBookSettings = () => {
+    const cust = selectedPoGroup?.customerName || (selectedVendor !== 'ALL' ? selectedVendor : 'General Customer');
+    const existing = getCustomerSeriesBook(cust);
+    const updatedBook: CustomerSeriesBook = {
+      ...existing,
+      customerName: cust,
+      deliveryPrefix: bookPrefix.trim().toUpperCase() || 'DN',
+      deliveryStartNumber: Number(bookStartNum) || 1,
+      deliveryEndNumber: Number(bookEndNum) || 200,
+      deliveryCurrentNumber: Number(bookCurrentNum) || 1,
+      padding: Number(bookPadding) || 3,
+    };
+    saveOrUpdateCustomerSeriesBook(updatedBook);
+    setActiveCustomerBook(updatedBook);
+    setDnNumber(formatSeriesNumber(updatedBook.deliveryPrefix, updatedBook.deliveryCurrentNumber, updatedBook.padding));
+    setIsBookModalOpen(false);
+    if (onSeriesConfigChanged) onSeriesConfigChanged();
   };
 
   // Toggle select all lines
@@ -346,13 +450,6 @@ export const DeliveryNotesManager: React.FC<DeliveryNotesManagerProps> = ({
     };
   }, [deliveryLines, selectedPoGroup]);
 
-  // Advance to next DN series number manually
-  const handleAdvanceToNextDNNumber = () => {
-    const nextFormatted = advanceSeriesNumber('delivery');
-    setDnNumber(nextFormatted);
-    if (onSeriesConfigChanged) onSeriesConfigChanged();
-  };
-
   // Save Delivery Note record
   const handleSave = (andPrint: boolean = false) => {
     setErrorMessage(null);
@@ -390,590 +487,758 @@ export const DeliveryNotesManager: React.FC<DeliveryNotesManagerProps> = ({
       }
     }
 
+    const customerName = selectedPoGroup.customerName;
+
+    const totalDeliveredQuantity = selectedLines.reduce(
+      (acc, l) => acc + (Number(l.deliveredQuantity) || 0),
+      0
+    );
+    const totalDeliveredValue =
+      Math.round(
+        selectedLines.reduce((acc, l) => acc + (Number(l.valueAfterVat) || 0), 0) * 100
+      ) / 100;
+
     const newDN: DeliveryNoteRecord = {
       id: `DN-REC-${Date.now()}`,
       deliveryNoteNumber: dnNumber.trim(),
       deliveryDate: dnDate,
       poNumber: selectedPoGroup.poNumber,
-      customerName: selectedPoGroup.customerName,
+      customerName: customerName,
       destination: selectedPoGroup.destination,
       contract: selectedPoGroup.contract,
       poDate: selectedPoGroup.date,
+      lines: selectedLines,
+      totalDeliveredQuantity,
+      totalDeliveredValue,
       carrier: carrier.trim(),
       vehicleNumber: vehicleNumber.trim(),
       driverName: driverName.trim(),
       receivedBy: receivedBy.trim(),
-      lines: selectedLines,
-      subtotalBeforeVat: deliveryTotals.subtotalBeforeVat,
-      totalVat: deliveryTotals.totalVat,
-      totalDeliveredQuantity: deliveryTotals.totalItemsCount,
-      totalDeliveredValue: deliveryTotals.totalAfterVat,
       notes: notes.trim(),
       createdAt: new Date().toISOString(),
+      matchedInvoiceNumber: undefined,
+      isFullyInvoiced: false,
     };
+
+    // Hide saving button to control double click
+    setIsSaving(true);
 
     onSaveDeliveryNote(newDN);
     setSuccessSavedDN(newDN);
 
-    // Automatically advance series number for next delivery note
-    advanceSeriesNumber('delivery');
+    // Advance series configuration for customer
+    const nextFormatted = advanceCustomerSeriesNumber(customerName, 'delivery');
     if (onSeriesConfigChanged) onSeriesConfigChanged();
 
     if (andPrint) {
       setPrintingDN(newDN);
     }
+
+    // Automatically open a new next record
+    setTimeout(() => {
+      setDnNumber(nextFormatted);
+      setNotes('');
+      setCarrier('');
+      setVehicleNumber('');
+      setDriverName('');
+      setReceivedBy('');
+      if (selectedPoGroup) {
+        handleSelectPO(selectedPoGroup.poNumber);
+      }
+      setIsSaving(false);
+    }, 400);
+  };
+
+  // Cancel Delivery Note Number without PO Reference
+  const handleConfirmCancelDeliveryNumber = () => {
+    const cust = selectedPoGroup?.customerName || (selectedVendor !== 'ALL' ? selectedVendor : 'General Customer');
+    const finalReason = cancelReason === 'Other custom reason' ? (customCancelNote || 'Cancelled') : cancelReason;
+
+    const cancelledDN: DeliveryNoteRecord = {
+      id: `DN-CANCELLED-${Date.now()}`,
+      deliveryNoteNumber: dnNumber.trim(),
+      deliveryDate: dnDate,
+      poNumber: 'N/A (No PO Reference)',
+      customerName: cust,
+      destination: 'N/A',
+      contract: 'N/A',
+      poDate: dnDate,
+      carrier: 'N/A',
+      vehicleNumber: 'N/A',
+      driverName: 'N/A',
+      receivedBy: 'N/A',
+      lines: [],
+      totalDeliveredQuantity: 0,
+      totalDeliveredValue: 0,
+      isCancelled: true,
+      cancelReason: finalReason,
+      notes: `CANCELLED: ${finalReason}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    onSaveDeliveryNote(cancelledDN);
+
+    const nextFormatted = advanceCustomerSeriesNumber(cust, 'delivery');
+    setDnNumber(nextFormatted);
+    setIsCancelModalOpen(false);
+    setHeaderComment('Okay');
+    setErrorMessage(null);
+
+    setSuccessSavedDN(cancelledDN);
+    if (onSeriesConfigChanged) onSeriesConfigChanged();
   };
 
   // Reset form for next delivery note
   const handleStartNextDN = () => {
     setSuccessSavedDN(null);
-    setDnNumber(getNextDNFromSeries());
+    const cust = selectedPoGroup?.customerName || (selectedVendor !== 'ALL' ? selectedVendor : '');
+    const nextNum = peekCustomerSeriesNumber(cust, 'delivery');
+    setDnNumber(nextNum);
     setNotes('');
     if (selectedPoGroup) {
       handleSelectPO(selectedPoGroup.poNumber);
     }
   };
 
-  const allSelected = deliveryLines.length > 0 && deliveryLines.every((l) => l.isSelected);
+  // Export Delivery Notes to Excel
+  const handleExportToExcel = () => {
+    if (deliveryNotes.length === 0) return;
 
-  // Filtered delivery notes for database view
-  const filteredDatabaseNotes = useMemo(() => {
+    const exportRows: any[] = [];
+    deliveryNotes.forEach((dn) => {
+      if (dn.lines && dn.lines.length > 0) {
+        dn.lines.forEach((l) => {
+          exportRows.push({
+            'DN Number': dn.deliveryNoteNumber,
+            'DN Date': dn.deliveryDate,
+            'PO Number': dn.poNumber,
+            'Customer': dn.customerName,
+            'Destination': dn.destination,
+            'Carrier': dn.carrier,
+            'Vehicle': dn.vehicleNumber,
+            'Driver': dn.driverName,
+            'Received By': dn.receivedBy,
+            'Item Description': l.itemDescription,
+            'UOM': l.unitOfMeasure,
+            'Delivered Qty': l.deliveredQuantity,
+            'Matched Invoice': dn.matchedInvoiceNumber || 'Pending Invoice',
+            'Notes': dn.notes || '',
+          });
+        });
+      } else {
+        exportRows.push({
+          'DN Number': dn.deliveryNoteNumber,
+          'DN Date': dn.deliveryDate,
+          'PO Number': dn.poNumber,
+          'Customer': dn.customerName,
+          'Destination': dn.destination,
+          'Carrier': dn.carrier,
+          'Vehicle': dn.vehicleNumber,
+          'Driver': dn.driverName,
+          'Received By': dn.receivedBy,
+          'Item Description': 'N/A (Cancelled)',
+          'UOM': '',
+          'Delivered Qty': 0,
+          'Matched Invoice': '',
+          'Notes': dn.notes || '',
+        });
+      }
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'DeliveryNotes');
+    XLSX.writeFile(workbook, `Delivery_Notes_Export_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const allSelected = deliveryLines.length > 0 && deliveryLines.every((l) => l.isSelected);
+  const activeCustomer = selectedPoGroup?.customerName || (selectedVendor !== 'ALL' ? selectedVendor : 'General Customer');
+
+  // Filtered Delivery Notes Database
+  const filteredDatabaseDNs = useMemo(() => {
     return deliveryNotes.filter((dn) => {
       const matchSearch =
+        !dbSearchTerm ||
         dn.deliveryNoteNumber.toLowerCase().includes(dbSearchTerm.toLowerCase()) ||
         dn.poNumber.toLowerCase().includes(dbSearchTerm.toLowerCase()) ||
         dn.customerName.toLowerCase().includes(dbSearchTerm.toLowerCase()) ||
-        dn.destination.toLowerCase().includes(dbSearchTerm.toLowerCase());
+        (dn.carrier && dn.carrier.toLowerCase().includes(dbSearchTerm.toLowerCase()));
 
       const matchVendor = dbVendorFilter === 'ALL' || dn.customerName === dbVendorFilter;
       return matchSearch && matchVendor;
     });
   }, [deliveryNotes, dbSearchTerm, dbVendorFilter]);
 
-  const handleExportDNExcel = () => {
-    const exportData = filteredDatabaseNotes.map((dn, idx) => ({
-      '#': idx + 1,
-      'Delivery Note #': dn.deliveryNoteNumber,
-      'Delivery Date': dn.deliveryDate,
-      'PO Number': dn.poNumber,
-      'Customer / Vendor': dn.customerName,
-      'Destination': dn.destination,
-      'Carrier': dn.carrier || '',
-      'Vehicle #': dn.vehicleNumber || '',
-      'Received By': dn.receivedBy || '',
-      'Delivered Qty': dn.totalDeliveredQuantity,
-      'Delivered Value ($)': dn.totalDeliveredValue,
-      'Notes': dn.notes || '',
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Delivery_Notes');
-    XLSX.writeFile(workbook, `Delivery_Notes_Report_${new Date().toISOString().slice(0, 10)}.xlsx`);
-  };
-
   return (
     <div className="space-y-6 pb-12">
-      {/* Top Header & Switcher */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-white shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-600/30 text-indigo-400 border border-indigo-500/30 flex items-center justify-center font-bold">
-            <Truck className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold tracking-tight text-white">Record Delivery Note</h1>
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                Logistics Dispatch
-              </span>
-            </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Mirror of invoice workflow: select vendor, load PO line items, track dispatch quantities and auto-advance DN number series.
-            </p>
-          </div>
-        </div>
-
+      {/* Sub-navigation Tabs */}
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-3">
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setViewMode(viewMode === 'create' ? 'database' : 'create')}
-            className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+            onClick={() => setViewMode('create')}
+            className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer ${
+              viewMode === 'create'
+                ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
+                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+            }`}
           >
-            {viewMode === 'create' ? (
-              <>
-                <FileText className="w-3.5 h-3.5 text-indigo-400" />
-                View DN Database ({deliveryNotes.length})
-              </>
-            ) : (
-              <>
-                <PlusCircle className="w-3.5 h-3.5 text-indigo-400" />
-                Back to Record Delivery Note
-              </>
-            )}
+            <Truck className="w-4 h-4" />
+            Issue Delivery Note
+          </button>
+          <button
+            onClick={() => setViewMode('database')}
+            className={`px-4 py-2 rounded-xl font-bold text-xs flex items-center gap-2 transition-all cursor-pointer ${
+              viewMode === 'database'
+                ? 'bg-blue-600 text-white shadow-sm shadow-blue-500/20'
+                : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            Delivery Notes Database ({deliveryNotes.length})
           </button>
         </div>
+
+        {viewMode === 'database' && (
+          <button
+            onClick={handleExportToExcel}
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Export to Excel
+          </button>
+        )}
       </div>
 
-      {/* Success Notification Banner */}
-      {successSavedDN && (
-        <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-5 shadow-sm space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
-                <CheckCircle2 className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-emerald-900">
-                  Delivery Note {successSavedDN.deliveryNoteNumber} Successfully Recorded!
-                </h3>
-                <p className="text-xs text-emerald-700 mt-0.5">
-                  Logged into Delivery Database against PO <span className="font-mono font-bold">{successSavedDN.poNumber}</span> ({successSavedDN.customerName}). Total Items: <span className="font-bold">{successSavedDN.totalDeliveredQuantity} units</span> (${formatCurrency(successSavedDN.totalDeliveredValue)}).
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => setPrintingDN(successSavedDN)}
-                className="px-3.5 py-1.5 bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                Print Delivery Note
-              </button>
-              <button
-                onClick={() => setViewMode('database')}
-                className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                View Database
-              </button>
-              <button
-                onClick={handleStartNextDN}
-                className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
-              >
-                <PlusCircle className="w-3.5 h-3.5" />
-                Record Next DN
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* VIEW MODE 1: CREATE / RECORD DELIVERY NOTE */}
-      {viewMode === 'create' && (
+      {viewMode === 'create' ? (
         <div className="space-y-6">
-          {/* TOP CONTROLS: VENDOR & SEARCHABLE PO SELECTOR */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Vendor Selector */}
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5 flex items-center gap-1.5">
-                  <Building2 className="w-3.5 h-3.5 text-blue-600" />
-                  Select Vendor / Customer
-                </label>
-                <select
-                  value={selectedVendor}
-                  onChange={(e) => handleVendorChange(e.target.value)}
-                  className="w-full text-xs font-medium px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-colors"
-                >
-                  <option value="ALL">All Vendors / Customers ({vendors.length})</option>
-                  {vendors.map((v) => (
-                    <option key={v} value={v}>
-                      {v}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* PO Searchable Dropdown */}
-              <div className="relative" ref={dropdownRef}>
-                <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5 flex items-center gap-1.5">
-                  <Search className="w-3.5 h-3.5 text-indigo-600" />
-                  Select PO Number
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={poSearchInput}
-                    onChange={(e) => {
-                      setPoSearchInput(e.target.value);
-                      setIsPoDropdownOpen(true);
-                    }}
-                    onFocus={() => setIsPoDropdownOpen(true)}
-                    placeholder="Type PO # or pick from list..."
-                    className="w-full text-xs font-mono font-bold px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:bg-white pr-8"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setIsPoDropdownOpen(!isPoDropdownOpen)}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
-                  >
-                    <ChevronDown className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {/* Dropdown popup */}
-                {isPoDropdownOpen && (
-                  <div className="absolute left-0 right-0 top-full mt-1.5 bg-white rounded-xl shadow-xl border border-slate-200 z-50 max-h-64 overflow-y-auto divide-y divide-slate-100 animate-in fade-in">
-                    {suggestedPOs.length === 0 ? (
-                      <div className="p-3 text-xs text-slate-500 text-center">No matching POs found</div>
-                    ) : (
-                      suggestedPOs.map((po) => (
-                        <div
-                          key={po.poNumber}
-                          onClick={() => handleSelectPO(po.poNumber)}
-                          className={`p-3 text-xs cursor-pointer hover:bg-indigo-50 transition-colors flex items-center justify-between ${
-                            selectedPoGroup?.poNumber === po.poNumber ? 'bg-indigo-50/70 border-l-4 border-indigo-600' : ''
-                          }`}
-                        >
-                          <div>
-                            <div className="font-mono font-bold text-slate-900">{po.poNumber}</div>
-                            <div className="text-[11px] text-slate-500">{po.customerName} • {po.destination}</div>
-                          </div>
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-700">
-                            {po.lines.length} items
-                          </span>
-                        </div>
-                      ))
-                    )}
+          {/* Success Banner */}
+          {successSavedDN && (
+            <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-5 shadow-sm space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-6 h-6" />
                   </div>
-                )}
-              </div>
-
-              {/* Delivery Note Number with Next Series Button */}
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5 flex items-center justify-between">
-                  <span className="flex items-center gap-1.5">
-                    <Truck className="w-3.5 h-3.5 text-indigo-600" />
-                    Delivery Note #
-                  </span>
+                  <div>
+                    <h3 className="text-base font-bold text-emerald-900">
+                      Delivery Note {successSavedDN.deliveryNoteNumber} Recorded!
+                    </h3>
+                    <p className="text-xs text-emerald-700 mt-0.5">
+                      Logged against PO <span className="font-mono font-bold">{successSavedDN.poNumber}</span> ({successSavedDN.customerName}).
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
                   <button
-                    type="button"
-                    onClick={handleAdvanceToNextDNNumber}
-                    className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold inline-flex items-center gap-0.5 cursor-pointer"
-                    title="Advance to next series number"
+                    onClick={() => setPrintingDN(successSavedDN)}
+                    className="px-3.5 py-1.5 bg-white border border-emerald-300 text-emerald-800 hover:bg-emerald-100 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
                   >
-                    <Sparkles className="w-3 h-3" />
-                    Next Series #
+                    <Printer className="w-3.5 h-3.5" />
+                    Print / PDF
                   </button>
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    required
-                    value={dnNumber}
-                    onChange={(e) => setDnNumber(e.target.value)}
-                    placeholder="e.g. DN-001"
-                    className="w-full text-xs font-mono font-bold text-indigo-700 px-3 py-2.5 bg-indigo-50/40 border border-indigo-200 rounded-xl focus:ring-2 focus:ring-indigo-500"
-                  />
+                  <button
+                    onClick={() => setViewMode('database')}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    View DN Database
+                  </button>
+                  <button
+                    onClick={handleStartNextDN}
+                    className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  >
+                    <PlusCircle className="w-3.5 h-3.5" />
+                    Issue Another DN
+                  </button>
                 </div>
               </div>
-
-              {/* Delivery Date */}
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-500 mb-1.5 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                  Delivery Date
-                </label>
-                <input
-                  type="date"
-                  required
-                  value={dnDate}
-                  onChange={(e) => setDnDate(e.target.value)}
-                  className="w-full text-xs font-medium px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
             </div>
+          )}
 
-            {/* Additional Carrier & Dispatch Details */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-3 border-t border-slate-100 text-xs">
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1">Carrier / Transporter</label>
-                <input
-                  type="text"
-                  value={carrier}
-                  onChange={(e) => setCarrier(e.target.value)}
-                  placeholder="e.g. Enterprise Logistics"
-                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1">Vehicle / Reg Number</label>
-                <input
-                  type="text"
-                  value={vehicleNumber}
-                  onChange={(e) => setVehicleNumber(e.target.value)}
-                  placeholder="e.g. T 492 DXB"
-                  className="w-full text-xs font-mono px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1">Driver / Dispatcher</label>
-                <input
-                  type="text"
-                  value={driverName}
-                  onChange={(e) => setDriverName(e.target.value)}
-                  placeholder="e.g. Hassan Rashid"
-                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1">Receiving Officer (Site)</label>
-                <input
-                  type="text"
-                  value={receivedBy}
-                  onChange={(e) => setReceivedBy(e.target.value)}
-                  placeholder="e.g. Authorized Consignee"
-                  className="w-full text-xs px-3 py-2 border border-slate-300 rounded-lg bg-white"
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* ERROR MESSAGE ALERT */}
+          {/* Error alert */}
           {errorMessage && (
-            <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+            <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 flex items-center gap-2 shadow-xs">
+              <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
               <span>{errorMessage}</span>
             </div>
           )}
 
-          {/* ACTIVE PO DETAILS BAR */}
-          {selectedPoGroup && (
-            <div className="bg-slate-900 text-white rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white font-bold">
-                  <Package className="w-5 h-5" />
+          {/* Delivery Note Form Container */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            {/* Top Dark Header */}
+            <div className="bg-slate-900 text-white p-5 sm:p-6 border-b border-slate-800">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-5 border-b border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-blue-600/30 border border-blue-400/30 text-blue-300">
+                    <Truck className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h1 className="font-bold text-lg text-white">Official Goods Delivery Note</h1>
+                      {selectedPoGroup && (
+                        <span className="text-xs px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-mono font-semibold">
+                          {selectedPoGroup.poNumber}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Generate delivery notes with client-specific serial numbering, dispatch carrier details, and line item tracking.
+                    </p>
+                  </div>
                 </div>
+
+                {/* Quick Actions */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsBookModalOpen(true)}
+                    className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 text-blue-300 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Configure customer series book (e.g. CRU001-CRU200)"
+                  >
+                    <BookOpen className="w-3.5 h-3.5 text-blue-400" />
+                    Customer Book: {activeCustomerBook ? `${activeCustomerBook.deliveryPrefix || activeCustomerBook.invoicePrefix} (${activeCustomerBook.deliveryStartNumber || 1}-${activeCustomerBook.deliveryEndNumber || 200})` : 'Default'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsCancelModalOpen(true)}
+                    className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title="Mark this delivery note as Cancelled / No PO reference and advance serial number"
+                  >
+                    <Ban className="w-3.5 h-3.5 text-red-400" />
+                    Cancel This # (No PO Ref)
+                  </button>
+                </div>
+              </div>
+
+              {/* Form Controls Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 pt-5">
+                {/* 1. Customer Selection */}
                 <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-sm text-indigo-300">{selectedPoGroup.poNumber}</span>
-                    <span className="text-xs text-slate-400">•</span>
-                    <span className="font-bold text-xs text-white">{selectedPoGroup.customerName}</span>
-                  </div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">
-                    Site: <span className="text-slate-200">{selectedPoGroup.destination}</span> • Contract: <span className="text-slate-200">{selectedPoGroup.contract}</span> • PO Date: <span className="text-slate-200">{selectedPoGroup.date}</span>
-                  </div>
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block mb-1.5 flex items-center gap-1.5">
+                    <Building2 className="w-3.5 h-3.5 text-blue-400" />
+                    Customer Name <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    value={selectedVendor}
+                    onChange={(e) => handleVendorChange(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs font-medium text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="ALL">-- Select or Filter Customer --</option>
+                    {vendors.map((v) => (
+                      <option key={v} value={v}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    {activeCustomerBook ? `Prefix: ${activeCustomerBook.deliveryPrefix || activeCustomerBook.invoicePrefix}` : 'Customer book applies'}
+                  </span>
                 </div>
-              </div>
 
-              <div className="flex items-center gap-3 text-xs">
-                <button
-                  type="button"
-                  onClick={() => handleToggleSelectAll(!allSelected)}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  {allSelected ? <CheckSquare className="w-3.5 h-3.5 text-indigo-400" /> : <Square className="w-3.5 h-3.5 text-slate-400" />}
-                  <span>{allSelected ? 'Unselect All' : 'Select All Items'}</span>
-                </button>
-              </div>
-            </div>
-          )}
+                {/* 2. PO Number Selection */}
+                <div className="relative" ref={dropdownRef}>
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Search className="w-3.5 h-3.5 text-blue-400" />
+                      PO Number <span className="text-red-400">*</span>
+                    </span>
+                    {vendorFilteredPOs.length > 0 && (
+                      <span className="text-[10px] text-slate-400 font-normal">
+                        {vendorFilteredPOs.length} available
+                      </span>
+                    )}
+                  </label>
 
-          {/* LINE ITEMS TABLE */}
-          {deliveryLines.length > 0 ? (
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-900 text-white font-semibold uppercase text-[11px]">
-                    <tr>
-                      <th className="py-3.5 px-3 w-10 text-center">
-                        <input
-                          type="checkbox"
-                          checked={allSelected}
-                          onChange={(e) => handleToggleSelectAll(e.target.checked)}
-                          className="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                        />
-                      </th>
-                      <th className="py-3.5 px-3">Item Description</th>
-                      <th className="py-3.5 px-2 text-center">UOM</th>
-                      <th className="py-3.5 px-3 text-right">PO Qty</th>
-                      <th className="py-3.5 px-3 text-right">Already Deliv.</th>
-                      <th className="py-3.5 px-3 text-right text-indigo-300">Available</th>
-                      <th className="py-3.5 px-3 text-right w-36">Delivering Qty</th>
-                      <th className="py-3.5 px-3 text-right">Unit Price</th>
-                      <th className="py-3.5 px-3 text-right">Subtotal</th>
-                      <th className="py-3.5 px-3 text-right">VAT (18%)</th>
-                      <th className="py-3.5 px-3 text-right">Total Value</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-200">
-                    {deliveryLines.map((line, idx) => {
-                      const isAvailable = line.availableQuantity > 0;
-                      return (
-                        <tr
-                          key={line.poLineId || idx}
-                          className={`transition-colors ${
-                            line.isSelected ? 'bg-indigo-50/40 hover:bg-indigo-50/70' : 'hover:bg-slate-50/60 opacity-80'
-                          }`}
-                        >
-                          <td className="py-3 px-3 text-center">
-                            <input
-                              type="checkbox"
-                              checked={line.isSelected || false}
-                              disabled={!isAvailable && line.availableQuantity <= 0}
-                              onChange={() => handleToggleLine(idx)}
-                              className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:opacity-30"
-                            />
-                          </td>
-                          <td className="py-3 px-3 font-semibold text-slate-900 max-w-xs truncate">
-                            {line.itemDescription}
-                          </td>
-                          <td className="py-3 px-2 text-center font-mono text-slate-600">{line.unitOfMeasure}</td>
-                          <td className="py-3 px-3 text-right text-slate-500">{line.poQuantity}</td>
-                          <td className="py-3 px-3 text-right text-slate-500">{line.alreadyDeliveredQuantity}</td>
-                          <td className="py-3 px-3 text-right font-bold text-indigo-700">
-                            {line.availableQuantity}
-                          </td>
-                          <td className="py-2.5 px-3 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <input
-                                type="number"
-                                min="0"
-                                max={line.availableQuantity}
-                                step="any"
-                                value={line.deliveredQuantity}
-                                onChange={(e) => handleQuantityChange(idx, e.target.value)}
-                                disabled={!isAvailable}
-                                className="w-20 text-right font-bold text-xs px-2 py-1 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleSetMaxQuantity(idx)}
-                                disabled={!isAvailable}
-                                className="px-1.5 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded disabled:opacity-30 cursor-pointer"
-                                title="Set maximum available quantity"
-                              >
-                                Max
-                              </button>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={poSearchInput}
+                      onChange={(e) => {
+                        setPoSearchInput(e.target.value);
+                        setIsPoDropdownOpen(true);
+                      }}
+                      onFocus={() => setIsPoDropdownOpen(true)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && suggestedPOs.length > 0) {
+                          handleSelectPO(suggestedPOs[0].poNumber);
+                        }
+                      }}
+                      placeholder="Type or select PO Number..."
+                      className="w-full pl-3 pr-8 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs font-mono font-bold text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsPoDropdownOpen(!isPoDropdownOpen)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      <ChevronDown className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {/* Dropdown Suggestions */}
+                  {isPoDropdownOpen && (
+                    <div className="absolute left-0 right-0 top-full mt-1.5 z-30 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl max-h-60 overflow-y-auto divide-y divide-slate-700 text-xs">
+                      {suggestedPOs.length === 0 ? (
+                        <div className="p-3 text-center text-slate-400 text-xs">
+                          No POs found matching "{poSearchInput}"
+                        </div>
+                      ) : (
+                        suggestedPOs.map((po) => (
+                          <div
+                            key={po.poNumber}
+                            onClick={() => handleSelectPO(po.poNumber)}
+                            className={`p-2.5 hover:bg-slate-700 cursor-pointer transition-colors flex items-center justify-between gap-2 ${
+                              selectedPoGroup?.poNumber === po.poNumber ? 'bg-blue-600/30' : ''
+                            }`}
+                          >
+                            <div>
+                              <div className="font-mono font-bold text-white">{po.poNumber}</div>
+                              <div className="text-[11px] text-slate-300 truncate max-w-[180px]">
+                                {po.customerName}
+                              </div>
                             </div>
-                          </td>
-                          <td className="py-3 px-3 text-right text-slate-700">${formatCurrency(line.unitPrice)}</td>
-                          <td className="py-3 px-3 text-right text-slate-800">${formatCurrency(line.valueBeforeVat)}</td>
-                          <td className="py-3 px-3 text-right text-slate-500">${formatCurrency(line.vatAmount)}</td>
-                          <td className="py-3 px-3 text-right font-bold text-slate-900">${formatCurrency(line.valueAfterVat)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-500">
-              <Truck className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-              <p className="font-semibold text-sm">Please select a Purchase Order to load line items for delivery.</p>
-            </div>
-          )}
-
-          {/* SUMMARY FINANCIAL BOX & ACTION BAR */}
-          {deliveryLines.length > 0 && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Special Delivery Remarks */}
-              <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
-                <label className="block text-xs font-bold uppercase text-slate-600">
-                  Delivery Remarks & Special Instructions
-                </label>
-                <textarea
-                  rows={3}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="e.g. Delivered directly to Central Warehouse Bay #3. Inspected and approved by Site Engineer."
-                  className="w-full text-xs p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 bg-slate-50"
-                />
-              </div>
-
-              {/* Totals & Submit */}
-              <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
-                <h4 className="text-xs font-bold uppercase text-slate-500 pb-2 border-b border-slate-100">
-                  Delivery Note Financial Summary
-                </h4>
-
-                <div className="space-y-2 text-xs">
-                  <div className="flex justify-between text-slate-600">
-                    <span>Lines Selected:</span>
-                    <span className="font-bold text-slate-900">{deliveryTotals.selectedCount} / {deliveryLines.length}</span>
-                  </div>
-                  <div className="flex justify-between text-slate-600">
-                    <span>Total Delivered Units:</span>
-                    <span className="font-bold text-slate-900">{deliveryTotals.totalItemsCount} units</span>
-                  </div>
-                  <div className="flex justify-between text-slate-600">
-                    <span>Subtotal Before VAT:</span>
-                    <span className="font-semibold text-slate-800">${formatCurrency(deliveryTotals.subtotalBeforeVat)}</span>
-                  </div>
-                  <div className="flex justify-between text-slate-600">
-                    <span>VAT Amount (18%):</span>
-                    <span className="font-semibold text-slate-800">${formatCurrency(deliveryTotals.totalVat)}</span>
-                  </div>
-                  <div className="border-t border-slate-200 pt-2 flex justify-between text-sm font-bold text-indigo-950">
-                    <span>Total Delivered Value:</span>
-                    <span className="font-mono text-base">${formatCurrency(deliveryTotals.totalAfterVat)}</span>
-                  </div>
+                            <div className="text-right shrink-0">
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-blue-500/20 text-blue-300">
+                                {po.status}
+                              </span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                <div className="pt-2 flex flex-col gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleSave(false)}
-                    className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white rounded-xl text-xs font-bold inline-flex items-center justify-center gap-2 shadow-sm transition-colors cursor-pointer"
-                  >
-                    <Save className="w-4 h-4" />
-                    Save Delivery Note
-                  </button>
+                {/* 3. Delivery Note Number */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <Truck className="w-3.5 h-3.5 text-blue-400" />
+                      DN Number <span className="text-red-400">*</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleAdvanceToNextDNNumber}
+                      className="text-[10px] text-blue-400 hover:text-blue-300 font-semibold inline-flex items-center gap-0.5 cursor-pointer"
+                      title="Advance customer series"
+                    >
+                      <Sparkles className="w-3 h-3" />
+                      Next #
+                    </button>
+                  </label>
+                  <input
+                    type="text"
+                    value={dnNumber}
+                    onChange={(e) => setDnNumber(e.target.value)}
+                    placeholder="e.g. CRU001 or GRB001"
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs font-mono font-bold text-blue-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <span className="text-[10px] text-slate-400 mt-1 block">
+                    Prefix: {activeCustomerBook?.deliveryPrefix || activeCustomerBook?.invoicePrefix || 'Default'}
+                  </span>
+                </div>
 
-                  <button
-                    type="button"
-                    onClick={() => handleSave(true)}
-                    className="w-full py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold inline-flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                  >
-                    <Printer className="w-4 h-4" />
-                    Save & Print Preview
-                  </button>
+                {/* 4. Delivery Date */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block mb-1.5 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                    Delivery Date <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={dnDate}
+                    onChange={(e) => setDnDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-xs text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
                 </div>
               </div>
             </div>
-          )}
-        </div>
-      )}
 
-      {/* VIEW MODE 2: DELIVERY NOTES DATABASE */}
-      {viewMode === 'database' && (
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+            {/* Logistics & Dispatch Metadata Sub-panel */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
               <div>
-                <h3 className="font-bold text-base text-slate-900">Delivery Notes Database & Dispatch Ledger</h3>
-                <p className="text-xs text-slate-500">Historical delivery note records linked to purchase orders</p>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleExportDNExcel}
-                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-              >
-                <Download className="w-3.5 h-3.5 text-emerald-400" />
-                Export Ledger (Excel)
-              </button>
-            </div>
-
-            {/* Filter controls */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <label className="font-semibold text-slate-700 block mb-1">Carrier / Transporter</label>
                 <input
                   type="text"
-                  value={dbSearchTerm}
-                  onChange={(e) => setDbSearchTerm(e.target.value)}
-                  placeholder="Search by DN #, PO #, Customer, Destination..."
-                  className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-xl bg-slate-50 focus:bg-white"
+                  value={carrier}
+                  onChange={(e) => setCarrier(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Vehicle Plate #</label>
+                <input
+                  type="text"
+                  value={vehicleNumber}
+                  onChange={(e) => setVehicleNumber(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Driver Name</label>
+                <input
+                  type="text"
+                  value={driverName}
+                  onChange={(e) => setDriverName(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Receiving Officer / Site</label>
+                <input
+                  type="text"
+                  value={receivedBy}
+                  onChange={(e) => setReceivedBy(e.target.value)}
+                  className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
 
+            {/* Line Items Selection & Quantity Allocation Table */}
+            {selectedPoGroup ? (
+              <div className="p-5 sm:p-6 space-y-4">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                      Line Items Physical Dispatch Allocation
+                      <span className="text-xs font-semibold text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                        {deliveryTotals.selectedCount} items ({deliveryTotals.totalItemsCount} units)
+                      </span>
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Select lines dispatched in this delivery batch and enter the verified quantities.
+                    </p>
+                  </div>
+
+                  {/* Actions Aligned with Header */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSelectAll(true)}
+                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSelectAll(false)}
+                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Square className="w-3.5 h-3.5 text-slate-400" />
+                      Unselect All
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSave(true)}
+                      disabled={deliveryTotals.selectedCount === 0 || isSaving}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+                    >
+                      <Printer className="w-3.5 h-3.5" />
+                      Save & Print
+                    </button>
+
+                    {/* Primary Save Button: Save Delivery */}
+                    {!isSaving ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSave(false)}
+                        disabled={deliveryTotals.selectedCount === 0}
+                        className="px-5 py-2 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all inline-flex items-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
+                      >
+                        <Save className="w-4 h-4" />
+                        Save Delivery
+                      </button>
+                    ) : (
+                      <div className="px-5 py-2 bg-blue-700 text-white rounded-lg text-xs font-bold inline-flex items-center gap-2 shadow-xs cursor-not-allowed">
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Saving Delivery...</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Table */}
+                <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-slate-800 text-white font-semibold uppercase text-[11px]">
+                        <tr>
+                          <th className="py-3 px-3 text-center w-12">
+                            <input
+                              type="checkbox"
+                              checked={allSelected}
+                              onChange={(e) => handleToggleSelectAll(e.target.checked)}
+                              className="rounded text-blue-600 focus:ring-0 cursor-pointer"
+                            />
+                          </th>
+                          <th className="py-3 px-3 min-w-[220px]">Item Description</th>
+                          <th className="py-3 px-2 text-center">UOM</th>
+                          <th className="py-3 px-3 text-right">PO Total</th>
+                          <th className="py-3 px-3 text-right text-slate-300">Delivered</th>
+                          <th className="py-3 px-3 text-right text-amber-300">Remaining</th>
+                          <th className="py-3 px-3 text-center min-w-[150px]">
+                            Dispatch Qty <span className="text-blue-400 font-bold">*</span>
+                          </th>
+                          <th className="py-3 px-3 text-right">Unit Price</th>
+                          <th className="py-3 px-3 text-right">Line Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {deliveryLines.map((line, idx) => {
+                          const isDepleted = line.availableQuantity <= 0;
+
+                          return (
+                            <tr
+                              key={line.poLineId || idx}
+                              className={`transition-colors ${
+                                !line.isSelected
+                                  ? 'bg-slate-50/40 text-slate-400'
+                                  : isDepleted
+                                  ? 'bg-amber-50/20'
+                                  : 'bg-white hover:bg-blue-50/30'
+                              }`}
+                            >
+                              <td className="py-3 px-3 text-center">
+                                <input
+                                  type="checkbox"
+                                  checked={line.isSelected}
+                                  onChange={() => handleToggleLine(idx)}
+                                  disabled={isDepleted && line.deliveredQuantity === 0}
+                                  className="w-4 h-4 rounded text-blue-600 focus:ring-0 cursor-pointer"
+                                />
+                              </td>
+                              <td className="py-3 px-3 font-medium text-slate-900">
+                                <div>{line.itemDescription}</div>
+                                {isDepleted && (
+                                  <span className="text-[10px] text-amber-600 font-semibold">
+                                    Already fully delivered
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-3 px-2 text-center text-slate-600 font-mono font-semibold">
+                                {line.unitOfMeasure}
+                              </td>
+                              <td className="py-3 px-3 text-right font-semibold text-slate-700">
+                                {line.poQuantity}
+                              </td>
+                              <td className="py-3 px-3 text-right text-slate-500">
+                                {line.alreadyDeliveredQuantity}
+                              </td>
+                              <td className="py-3 px-3 text-right font-bold text-amber-700">
+                                {line.availableQuantity}
+                              </td>
+                              <td className="py-3 px-3 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max={line.availableQuantity}
+                                    step="any"
+                                    value={line.deliveredQuantity}
+                                    onChange={(e) => handleQuantityChange(idx, e.target.value)}
+                                    disabled={!line.isSelected || isDepleted}
+                                    className={`w-20 px-2.5 py-1.5 text-center font-bold text-sm rounded-lg border focus:outline-none ${
+                                      !line.isSelected || isDepleted
+                                        ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed'
+                                        : 'bg-white border-blue-400 text-slate-900 focus:ring-2 focus:ring-blue-500/20'
+                                    }`}
+                                  />
+                                  {line.isSelected && line.availableQuantity > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSetMaxQuantity(idx)}
+                                      className="px-1.5 py-1 text-[10px] font-bold uppercase bg-blue-50 text-blue-700 rounded border border-blue-200 hover:bg-blue-100 cursor-pointer"
+                                    >
+                                      Max
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="py-3 px-3 text-right font-semibold text-slate-800">
+                                TZS {formatCurrency(line.unitPrice)}
+                              </td>
+                              <td className="py-3 px-3 text-right font-bold text-slate-900">
+                                TZS {formatCurrency(line.isSelected ? line.valueAfterVat : 0)}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-100">
+                  <div className="text-xs text-slate-600">
+                    Selected lines: <span className="font-bold text-slate-900">{deliveryTotals.selectedCount}</span> ({deliveryTotals.totalItemsCount.toLocaleString()} total units).
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleStartNextDN}
+                      className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
+                    >
+                      <RotateCcw className="w-4 h-4 inline-block mr-1" />
+                      Reset
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSave(true)}
+                      disabled={deliveryTotals.selectedCount === 0 || isSaving}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-xs font-semibold cursor-pointer shadow-xs disabled:opacity-50"
+                    >
+                      <Printer className="w-4 h-4 inline-block mr-1" />
+                      Save & Print DN
+                    </button>
+                    {!isSaving ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSave(false)}
+                        disabled={deliveryTotals.selectedCount === 0}
+                        className="px-6 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold shadow-sm cursor-pointer disabled:opacity-50 inline-flex items-center gap-1.5"
+                      >
+                        <Save className="w-4 h-4" />
+                        Save Delivery
+                      </button>
+                    ) : (
+                      <div className="px-6 py-2 bg-blue-700 text-white rounded-lg text-xs font-bold shadow-xs cursor-not-allowed inline-flex items-center gap-2">
+                        <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>Saving Delivery...</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="p-12 text-center text-slate-400 text-xs">
+                Please select or search a PO Number from the header above to load line items.
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* Database View */
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={dbSearchTerm}
+                onChange={(e) => setDbSearchTerm(e.target.value)}
+                placeholder="Search DN, PO, or Customer..."
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs w-64 focus:outline-none focus:border-blue-500"
+              />
               <select
                 value={dbVendorFilter}
                 onChange={(e) => setDbVendorFilter(e.target.value)}
-                className="text-xs px-3 py-2 border border-slate-300 rounded-xl bg-slate-50"
+                className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-blue-500"
               >
-                <option value="ALL">All Customers / Vendors</option>
+                <option value="ALL">All Customers</option>
                 {vendors.map((v) => (
                   <option key={v} value={v}>
                     {v}
@@ -981,53 +1246,66 @@ export const DeliveryNotesManager: React.FC<DeliveryNotesManagerProps> = ({
                 ))}
               </select>
             </div>
+            <div className="text-xs text-slate-500">
+              Showing {filteredDatabaseDNs.length} of {deliveryNotes.length} Delivery Notes
+            </div>
+          </div>
 
-            {/* Table */}
-            <div className="border border-slate-200 rounded-xl overflow-hidden">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-900 text-white font-semibold uppercase text-[11px]">
+          <div className="border border-slate-200 rounded-xl overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead className="bg-slate-800 text-white font-semibold uppercase text-[11px]">
                   <tr>
-                    <th className="py-3 px-3">DN #</th>
-                    <th className="py-3 px-3">Date</th>
-                    <th className="py-3 px-3">PO Reference</th>
-                    <th className="py-3 px-3">Customer / Site</th>
-                    <th className="py-3 px-3">Carrier / Vehicle</th>
-                    <th className="py-3 px-3 text-right">Items</th>
-                    <th className="py-3 px-3 text-right">Total Delivered Value</th>
-                    <th className="py-3 px-3 text-center">Action</th>
+                    <th className="py-3 px-3">DN Number</th>
+                    <th className="py-3 px-3">Delivery Date</th>
+                    <th className="py-3 px-3">PO Number</th>
+                    <th className="py-3 px-3">Customer</th>
+                    <th className="py-3 px-3">Destination</th>
+                    <th className="py-3 px-3">Vehicle</th>
+                    <th className="py-3 px-3">Status</th>
+                    <th className="py-3 px-3 text-center">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {filteredDatabaseNotes.length === 0 ? (
+                <tbody className="divide-y divide-slate-100">
+                  {filteredDatabaseDNs.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-slate-500">
-                        No delivery notes found matching the criteria.
+                      <td colSpan={8} className="py-8 text-center text-slate-400">
+                        No delivery notes recorded yet. Issue one using the 'Issue Delivery Note' tab.
                       </td>
                     </tr>
                   ) : (
-                    filteredDatabaseNotes.map((dn) => (
-                      <tr key={dn.id} className="hover:bg-slate-50/60">
-                        <td className="py-3 px-3 font-mono font-bold text-indigo-700">{dn.deliveryNoteNumber}</td>
+                    filteredDatabaseDNs.map((dn) => (
+                      <tr key={dn.id} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-3 px-3 font-mono font-bold text-blue-700">
+                          {dn.deliveryNoteNumber}
+                        </td>
                         <td className="py-3 px-3 text-slate-600">{dn.deliveryDate}</td>
-                        <td className="py-3 px-3 font-mono text-slate-900 font-semibold">{dn.poNumber}</td>
-                        <td className="py-3 px-3 font-medium text-slate-900">
-                          {dn.customerName}
-                          <div className="text-[10px] text-slate-500">{dn.destination}</div>
+                        <td className="py-3 px-3 font-mono text-slate-800 font-semibold">{dn.poNumber}</td>
+                        <td className="py-3 px-3 text-slate-800">{dn.customerName}</td>
+                        <td className="py-3 px-3 text-slate-600">{dn.destination}</td>
+                        <td className="py-3 px-3 font-mono text-slate-600">{dn.vehicleNumber}</td>
+                        <td className="py-3 px-3">
+                          {dn.poNumber.includes('No PO') ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700">
+                              CANCELLED
+                            </span>
+                          ) : dn.matchedInvoiceNumber ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">
+                              Matched ({dn.matchedInvoiceNumber})
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-700">
+                              Pending Invoice
+                            </span>
+                          )}
                         </td>
-                        <td className="py-3 px-3 text-slate-600">
-                          {dn.carrier || 'Internal'}
-                          {dn.vehicleNumber && <span className="font-mono text-[10px] block text-slate-400">{dn.vehicleNumber}</span>}
-                        </td>
-                        <td className="py-3 px-3 text-right font-bold text-slate-800">{dn.totalDeliveredQuantity}</td>
-                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-900">${formatCurrency(dn.totalDeliveredValue)}</td>
                         <td className="py-3 px-3 text-center">
                           <button
-                            type="button"
                             onClick={() => setPrintingDN(dn)}
-                            className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-                            title="Print Delivery Note"
+                            className="p-1.5 text-slate-500 hover:text-blue-600 rounded cursor-pointer"
+                            title="Print / View Delivery Note"
                           >
-                            <Printer className="w-4 h-4" />
+                            <Eye className="w-4 h-4" />
                           </button>
                         </td>
                       </tr>
@@ -1040,11 +1318,214 @@ export const DeliveryNotesManager: React.FC<DeliveryNotesManagerProps> = ({
         </div>
       )}
 
-      {/* Printable Delivery Note Modal */}
-      <DeliveryNotePrintModal
-        deliveryNote={printingDN}
-        onClose={() => setPrintingDN(null)}
-      />
+      {/* Modal: Customer Delivery Series Book Setup */}
+      {isBookModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 text-slate-900">
+                <BookOpen className="w-5 h-5 text-blue-600" />
+                <h3 className="font-bold text-base">Customer Delivery Series Book Setup</h3>
+              </div>
+              <button
+                onClick={() => setIsBookModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500">
+              Each customer has their own dedicated prefix and serial number range for delivery notes (e.g. CRU001–CRU200, GRB001–GRB100).
+            </p>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Customer Name</label>
+                <input
+                  type="text"
+                  disabled
+                  value={activeCustomer}
+                  className="w-full px-3 py-2 bg-slate-100 border border-slate-300 rounded-lg font-bold text-slate-800"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">
+                    Delivery Prefix (e.g. CRU, GRB)
+                  </label>
+                  <input
+                    type="text"
+                    value={bookPrefix}
+                    onChange={(e) => setBookPrefix(e.target.value.toUpperCase())}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg font-mono font-bold text-blue-700 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">
+                    Padding Digits
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="6"
+                    value={bookPadding}
+                    onChange={(e) => setBookPadding(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Start Number</label>
+                  <input
+                    type="number"
+                    value={bookStartNum}
+                    onChange={(e) => setBookStartNum(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">End Number</label>
+                  <input
+                    type="number"
+                    value={bookEndNum}
+                    onChange={(e) => setBookEndNum(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Current Serial #</label>
+                  <input
+                    type="number"
+                    value={bookCurrentNum}
+                    onChange={(e) => setBookCurrentNum(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-white border border-blue-400 rounded-lg font-bold text-blue-800 focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-[11px] text-blue-800">
+                Preview Next Number:{' '}
+                <span className="font-mono font-bold text-blue-900">
+                  {formatSeriesNumber(bookPrefix, bookCurrentNum, bookPadding)}
+                </span>{' '}
+                (Range: {formatSeriesNumber(bookPrefix, bookStartNum, bookPadding)} to {formatSeriesNumber(bookPrefix, bookEndNum, bookPadding)})
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsBookModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveCustomerBookSettings}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold shadow-sm cursor-pointer"
+              >
+                Save Book Configuration
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Mark Delivery Note Number as Cancelled (No PO Reference) */}
+      {isCancelModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2 text-red-600">
+                <Ban className="w-5 h-5" />
+                <h3 className="font-bold text-base text-slate-900">Cancel Delivery Note Number</h3>
+              </div>
+              <button
+                onClick={() => setIsCancelModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              Mark delivery note leaflet <span className="font-mono font-bold text-red-600">{dnNumber}</span> as Cancelled (No PO Reference). This records the cancelled serial number in the database and automatically advances to the next serial number.
+            </p>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Customer Attribution</label>
+                <input
+                  type="text"
+                  disabled
+                  value={activeCustomer}
+                  className="w-full px-3 py-2 bg-slate-100 border border-slate-300 rounded-lg font-medium text-slate-800"
+                />
+              </div>
+
+              <div>
+                <label className="font-semibold text-slate-700 block mb-1">Cancellation Reason</label>
+                <select
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-red-500 font-medium"
+                >
+                  <option value="No PO reference">No PO reference</option>
+                  <option value="Spoiled / Voided physical DN leaflet">Spoiled / Voided physical DN leaflet</option>
+                  <option value="Order cancelled before dispatch">Order cancelled before dispatch</option>
+                  <option value="Printed with errors - replaced">Printed with errors - replaced</option>
+                  <option value="Other custom reason">Other custom reason</option>
+                </select>
+              </div>
+
+              {cancelReason === 'Other custom reason' && (
+                <div>
+                  <label className="font-semibold text-slate-700 block mb-1">Custom Note</label>
+                  <input
+                    type="text"
+                    value={customCancelNote}
+                    onChange={(e) => setCustomCancelNote(e.target.value)}
+                    placeholder="Enter reason..."
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-red-500"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsCancelModalOpen(false)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmCancelDeliveryNumber}
+                className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-bold shadow-sm cursor-pointer flex items-center gap-1.5"
+              >
+                <Ban className="w-3.5 h-3.5" />
+                Confirm & Mark Cancelled
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Print / PDF Modal */}
+      {printingDN && (
+        <DeliveryNotePrintModal
+          deliveryNote={printingDN}
+          onClose={() => setPrintingDN(null)}
+        />
+      )}
     </div>
   );
 };
